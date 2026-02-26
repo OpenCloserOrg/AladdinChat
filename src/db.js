@@ -21,9 +21,13 @@ async function initializeDatabase() {
     CREATE TABLE IF NOT EXISTS participants (
       id BIGSERIAL PRIMARY KEY,
       room_id BIGINT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-      socket_id TEXT NOT NULL UNIQUE,
+      socket_id TEXT,
+      client_id TEXT,
       role TEXT NOT NULL CHECK (role IN ('human', 'ai')),
       display_name TEXT,
+      is_primary_human BOOLEAN NOT NULL DEFAULT FALSE,
+      is_online BOOLEAN NOT NULL DEFAULT TRUE,
+      last_seen_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -52,6 +56,10 @@ async function initializeDatabase() {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS blocked_by_interject BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
     ALTER TABLE participants ADD COLUMN IF NOT EXISTS display_name TEXT;
+    ALTER TABLE participants ADD COLUMN IF NOT EXISTS client_id TEXT;
+    ALTER TABLE participants ADD COLUMN IF NOT EXISTS is_primary_human BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE participants ADD COLUMN IF NOT EXISTS is_online BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_display_name TEXT;
 
     DO $$
@@ -69,6 +77,7 @@ async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms (room_code);
     CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages (room_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_messages_delay ON messages (room_id, delayed_for_ai_until);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_room_client ON participants (room_id, client_id) WHERE client_id IS NOT NULL;
   `);
 }
 
@@ -137,14 +146,57 @@ async function saveMessage({
   return rows[0];
 }
 
-async function upsertParticipant({ roomId, socketId, role, displayName }) {
-  await pool.query(
-    `INSERT INTO participants (room_id, socket_id, role, display_name)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (socket_id)
-     DO UPDATE SET role = EXCLUDED.role, display_name = EXCLUDED.display_name, updated_at = NOW()`,
-    [roomId, socketId, role, displayName],
+async function getParticipantByClient(roomId, clientId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM participants WHERE room_id = $1 AND client_id = $2 LIMIT 1`,
+    [roomId, clientId],
   );
+  return rows[0] || null;
+}
+
+async function upsertParticipant({ roomId, socketId, clientId, role, displayName, isPrimaryHuman }) {
+  await pool.query(
+    `INSERT INTO participants (room_id, socket_id, client_id, role, display_name, is_primary_human, is_online, last_seen_at)
+     VALUES ($1, $2, $3, $4, $5, $6, TRUE, NOW())
+     ON CONFLICT (room_id, client_id)
+     DO UPDATE SET socket_id = EXCLUDED.socket_id,
+                   role = participants.role,
+                   display_name = participants.display_name,
+                   is_primary_human = participants.is_primary_human,
+                   is_online = TRUE,
+                   last_seen_at = NOW(),
+                   updated_at = NOW()`,
+    [roomId, socketId, clientId, role, displayName, Boolean(isPrimaryHuman)],
+  );
+}
+
+async function setParticipantOffline(socketId) {
+  await pool.query(
+    `UPDATE participants
+     SET is_online = FALSE, socket_id = NULL, last_seen_at = NOW(), updated_at = NOW()
+     WHERE socket_id = $1`,
+    [socketId],
+  );
+}
+
+async function listParticipants(roomId) {
+  const { rows } = await pool.query(
+    `SELECT client_id AS "clientId", role, display_name AS "displayName",
+            is_primary_human AS "isPrimaryHuman", is_online AS "isOnline", last_seen_at AS "lastSeenAt"
+     FROM participants
+     WHERE room_id = $1
+     ORDER BY created_at ASC`,
+    [roomId],
+  );
+  return rows;
+}
+
+async function hasPrimaryHuman(roomId) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM participants WHERE room_id = $1 AND role = 'human' AND is_primary_human = TRUE LIMIT 1`,
+    [roomId],
+  );
+  return rows.length > 0;
 }
 
 async function markDelivered(messageId) {
@@ -183,7 +235,11 @@ module.exports = {
   markRead,
   setRoomPause,
   getParticipantRoles,
+  getParticipantByClient,
   upsertParticipant,
+  setParticipantOffline,
+  listParticipants,
+  hasPrimaryHuman,
   markMessageReleased,
   blockMessageByInterject,
 };
