@@ -184,7 +184,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('set-role', async ({ roomCode, role }) => {
-    socket.emit('chat-error', 'Role is locked to your participant ID for this room.');
+    if (!roomCode || socket.data.roomCode !== roomCode) return;
+
+    if (socket.data.clientId) {
+      socket.emit('chat-error', 'Role is locked to your participant ID for this room.');
+      return;
+    }
+
+    const safeRole = role === 'human' ? 'human' : 'ai';
+    socket.data.role = safeRole;
+    socket.emit('role-selected', { role: safeRole });
   });
 
   socket.on('toggle-pause-ai', async ({ roomCode, pauseAi }) => {
