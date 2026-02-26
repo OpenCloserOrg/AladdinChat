@@ -12,6 +12,7 @@ const messagesEl = document.getElementById('messages');
 const composer = document.getElementById('composer');
 const messageInput = document.getElementById('message-input');
 const presence = document.getElementById('presence');
+const identityLabel = document.getElementById('identity-label');
 const roleSelect = document.getElementById('role-select');
 const pauseBtn = document.getElementById('pause-btn');
 const emergencyBtn = document.getElementById('emergency-btn');
@@ -19,6 +20,7 @@ const pauseWarning = document.getElementById('pause-warning');
 const interjectWarning = document.getElementById('interject-warning');
 const aiReadme = document.getElementById('ai-readme');
 const delayWarning = document.getElementById('delay-warning');
+const toastEl = document.getElementById('toast');
 const taskStateWrap = document.getElementById('task-state-wrap');
 const taskStateSelect = document.getElementById('task-state');
 const taskDescriptionInput = document.getElementById('task-description');
@@ -29,6 +31,8 @@ let messageState = new Map();
 let emergencyMode = false;
 let interjectActive = false;
 let pendingDelay = [];
+let myDisplayName = '';
+let toastTimer = null;
 
 const statusIcon = {
   sent: '✓',
@@ -101,7 +105,10 @@ composer.addEventListener('submit', (event) => {
 roleSelect.addEventListener('change', () => {
   if (!roomCode) return;
   socket.emit('set-role', { roomCode, role: roleSelect.value });
+  myDisplayName = '';
+  identityLabel.textContent = '';
   updateRoleUi();
+  refreshMessageVisibility();
   markVisibleAsRead();
 });
 
@@ -113,7 +120,7 @@ pauseBtn.addEventListener('click', () => {
 });
 
 emergencyBtn.addEventListener('click', () => {
-  if (!roomCode) return;
+  if (!roomCode || roleSelect.value !== 'human') return;
   emergencyMode = !emergencyMode;
   if (emergencyMode) {
     socket.emit('start-interject', { roomCode });
@@ -136,12 +143,18 @@ socket.on('chat-history', ({ messages, pauseAi: initialPauseAi, interjectActive:
     renderMessage(message);
   }
 
+  refreshMessageVisibility();
   markVisibleAsRead();
 });
 
 socket.on('message-new', (message) => {
+  if (message.senderSocketId === socket.id && message.senderDisplayName) {
+    myDisplayName = message.senderDisplayName;
+    identityLabel.textContent = `You are ${myDisplayName}`;
+  }
   messageState.set(message.id, message);
   renderMessage(message);
+  refreshMessageVisibility();
   markVisibleAsRead();
 });
 
@@ -185,8 +198,25 @@ socket.on('release-held-messages', ({ messageIds }) => {
   }
 });
 
-socket.on('participant-update', ({ count }) => {
+socket.on('participant-update', ({ count, participants = [] }) => {
   presence.textContent = `${count} participant${count === 1 ? '' : 's'} online`;
+  const ordered = Array.isArray(participants) ? participants.join(', ') : '';
+  if (ordered) {
+    identityLabel.textContent = socket.id && myDisplayName ? `You are ${myDisplayName} · In room: ${ordered}` : `In room: ${ordered}`;
+  }
+});
+
+
+socket.on('role-updated', ({ socketId, displayName }) => {
+  if (socketId === socket.id && displayName) {
+    myDisplayName = displayName;
+    identityLabel.textContent = `You are ${myDisplayName}`;
+  }
+});
+
+
+socket.on('toast-update', ({ level = 'info', message = '' }) => {
+  showToast(message, level);
 });
 
 socket.on('chat-error', (error) => {
@@ -197,6 +227,7 @@ function renderMessage(message) {
   const mine = message.senderSocketId === socket.id;
   const canSee = !message.heldForAi || roleSelect.value === 'human' || mine;
   const color = message.status === 'read' ? 'var(--ok)' : '#bfdbfe';
+  const senderLabel = `<div class="sender">${escapeHtml(message.senderDisplayName || message.senderRole || 'Participant')}</div>`;
   const taskBadge = message.taskState && message.taskState !== 'none'
     ? `<div class="task-badge">${taskLabels[message.taskState] || message.taskState}${message.taskDescription ? ` · ${escapeHtml(message.taskDescription)}` : ''}</div>`
     : '';
@@ -206,6 +237,7 @@ function renderMessage(message) {
   wrapper.dataset.messageId = message.id;
 
   wrapper.innerHTML = `
+    ${senderLabel}
     ${taskBadge}
     <div>${escapeHtml(message.body)}</div>
     <div class="meta">
@@ -233,12 +265,14 @@ function updatePauseUi() {
 function updateRoleUi() {
   const isAi = roleSelect.value === 'ai';
   aiReadme.classList.toggle('hidden', !isAi);
+  pauseBtn.classList.toggle('hidden', isAi);
+  emergencyBtn.classList.toggle('hidden', isAi);
   taskStateWrap.classList.toggle('hidden', !isAi);
   taskDescriptionInput.classList.toggle('hidden', !isAi);
 }
 
 function updateDelayWarning() {
-  if (roleSelect.value !== 'human' || pendingDelay.length === 0) {
+  if (pendingDelay.length === 0) {
     delayWarning.classList.add('hidden');
     delayWarning.textContent = '';
     return;
@@ -247,7 +281,9 @@ function updateDelayWarning() {
   const now = Date.now();
   const soonest = Math.min(...pendingDelay.map((item) => Number(item.releaseAt)));
   const seconds = Math.max(0, Math.ceil((soonest - now) / 1000));
-  delayWarning.textContent = `AI-to-AI delay active: ${pendingDelay.length} pending message${pendingDelay.length === 1 ? '' : 's'}. Human interject window: ${seconds}s.`;
+  delayWarning.textContent = roleSelect.value === 'human'
+    ? `AI-to-AI delay active: ${pendingDelay.length} pending message${pendingDelay.length === 1 ? '' : 's'}. Human interject window: ${seconds}s.`
+    : `Incoming update: ${pendingDelay.length} AI message${pendingDelay.length === 1 ? '' : 's'} waiting ${seconds}s for possible human interjection.`;
   delayWarning.classList.remove('hidden');
 }
 
@@ -304,6 +340,8 @@ function enterRoom(code) {
   landingScreen.classList.add('hidden');
   chatScreen.classList.remove('hidden');
 
+  myDisplayName = '';
+  identityLabel.textContent = '';
   updateRoleUi();
   socket.emit('join-room', { roomCode, role: roleSelect.value });
   messageInput.focus();
@@ -321,6 +359,25 @@ function markVisibleAsRead() {
   if (unreadIncoming.length > 0) {
     socket.emit('mark-read', { messageIds: unreadIncoming });
   }
+}
+
+function refreshMessageVisibility() {
+  for (const message of messageState.values()) {
+    const bubble = document.querySelector(`[data-message-id="${message.id}"]`);
+    if (!bubble) continue;
+    const mine = message.senderSocketId === socket.id;
+    const canSee = !message.heldForAi || roleSelect.value === 'human' || mine;
+    bubble.classList.toggle('hidden', !canSee);
+  }
+}
+
+function showToast(message, level = 'info') {
+  if (!message) return;
+  toastEl.textContent = message;
+  toastEl.dataset.level = level;
+  toastEl.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.add('hidden'), 4500);
 }
 
 function escapeHtml(value) {
