@@ -18,11 +18,16 @@ const {
   markRead,
   setRoomPause,
   getParticipantRoles,
+  markMessageReleased,
+  blockMessageByInterject,
 } = require('./src/db');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+const roomState = new Map();
+const AI_MESSAGE_DELAY_MS = 10_000;
 
 const port = Number(process.env.PORT || 3000);
 
@@ -89,8 +94,14 @@ io.on('connection', (socket) => {
 
       socket.join(roomCode);
 
-      const messages = await getMessages(room.id);
-      socket.emit('chat-history', { messages, pauseAi: room.pause_ai });
+      const messages = await getMessages(room.id, safeRole, socket.id);
+      const state = ensureRoomState(roomCode);
+      socket.emit('chat-history', {
+        messages,
+        pauseAi: room.pause_ai,
+        interjectActive: state.interjectActive,
+        pendingDelay: state.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
+      });
 
       await pool.query(
         `INSERT INTO participants (room_id, socket_id, role)
@@ -147,7 +158,23 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('send-message', async ({ roomCode, text, emergencyInterject = false }) => {
+  socket.on('start-interject', ({ roomCode }) => {
+    if (!roomCode) return;
+    const state = ensureRoomState(roomCode);
+    state.interjectActive = true;
+
+    for (const pending of state.pending) {
+      clearTimeout(pending.timer);
+      pending.blocked = true;
+      blockMessageByInterject(pending.messageId).catch((error) => console.error('blockMessageByInterject error', error));
+    }
+
+    state.pending = [];
+    io.to(roomCode).emit('interject-updated', { active: true });
+    io.to(roomCode).emit('pending-delay-update', { pending: [] });
+  });
+
+  socket.on('send-message', async ({ roomCode, text, emergencyInterject = false, taskState = 'none', taskDescription = '' }) => {
     if (!roomCode || !text || !text.trim()) return;
 
     try {
@@ -159,6 +186,9 @@ io.on('connection', (socket) => {
       const roles = await getParticipantRoles(room.id);
       const hasHuman = roles.includes('human');
       const heldForAi = room.pause_ai && hasHuman && senderRole === 'human' && !emergencyInterject;
+      const safeTaskState = ['none', 'task_start', 'task_update', 'task_complete'].includes(taskState) ? taskState : 'none';
+      const safeTaskDescription = String(taskDescription || '').trim().slice(0, 500);
+      const delayedForAiUntil = senderRole === 'ai' ? new Date(Date.now() + AI_MESSAGE_DELAY_MS).toISOString() : null;
 
       const message = await saveMessage({
         roomId: room.id,
@@ -168,12 +198,63 @@ io.on('connection', (socket) => {
         status: 'sent',
         emergencyInterject,
         heldForAi,
+        taskState: safeTaskState,
+        taskDescription: safeTaskDescription || null,
+        delayedForAiUntil,
       });
-
-      io.to(roomCode).emit('message-new', message);
 
       const roomSockets = io.sockets.adapter.rooms.get(roomCode) || new Set();
       const recipientSockets = [...roomSockets].filter((id) => id !== socket.id);
+      const recipients = recipientSockets.map((id) => io.sockets.sockets.get(id)).filter(Boolean);
+      const aiRecipients = recipients.filter((recipient) => recipient.data.role === 'ai');
+      const nonAiRecipients = recipients.filter((recipient) => recipient.data.role !== 'ai');
+
+      socket.emit('message-new', message);
+      for (const recipient of nonAiRecipients) {
+        recipient.emit('message-new', message);
+      }
+
+      if (senderRole === 'ai' && aiRecipients.length > 0) {
+        const state = ensureRoomState(roomCode);
+        const releaseAt = Date.now() + AI_MESSAGE_DELAY_MS;
+        const pendingEntry = {
+          messageId: message.id,
+          senderSocketId: socket.id,
+          releaseAt,
+          blocked: false,
+          timer: setTimeout(async () => {
+            const currentState = ensureRoomState(roomCode);
+            currentState.pending = currentState.pending.filter((entry) => entry.messageId !== message.id);
+
+            if (!currentState.interjectActive) {
+              const roomMembers = io.sockets.adapter.rooms.get(roomCode) || new Set();
+              for (const memberId of roomMembers) {
+                if (memberId === socket.id) continue;
+                const memberSocket = io.sockets.sockets.get(memberId);
+                if (memberSocket?.data.role === 'ai') {
+                  memberSocket.emit('message-new', message);
+                }
+              }
+              await markMessageReleased(message.id);
+            }
+
+            io.to(roomCode).emit('pending-delay-update', {
+              pending: currentState.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
+            });
+          }, AI_MESSAGE_DELAY_MS),
+        };
+
+        state.pending.push(pendingEntry);
+        io.to(roomCode).emit('pending-delay-update', {
+          pending: state.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
+        });
+      }
+
+      if (senderRole === 'human' && emergencyInterject) {
+        const state = ensureRoomState(roomCode);
+        state.interjectActive = false;
+        io.to(roomCode).emit('interject-updated', { active: false });
+      }
 
       if (recipientSockets.length > 0) {
         await markDelivered(message.id);
@@ -209,6 +290,13 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+function ensureRoomState(roomCode) {
+  if (!roomState.has(roomCode)) {
+    roomState.set(roomCode, { interjectActive: false, pending: [] });
+  }
+  return roomState.get(roomCode);
+}
 
 function isValidCode(code) {
   return typeof code === 'string' && code.length >= 10 && /\d/.test(code);

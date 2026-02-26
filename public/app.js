@@ -17,16 +17,29 @@ const pauseBtn = document.getElementById('pause-btn');
 const emergencyBtn = document.getElementById('emergency-btn');
 const pauseWarning = document.getElementById('pause-warning');
 const interjectWarning = document.getElementById('interject-warning');
+const aiReadme = document.getElementById('ai-readme');
+const delayWarning = document.getElementById('delay-warning');
+const taskStateWrap = document.getElementById('task-state-wrap');
+const taskStateSelect = document.getElementById('task-state');
+const taskDescriptionInput = document.getElementById('task-description');
 
 let roomCode = null;
 let pauseAi = false;
 let messageState = new Map();
 let emergencyMode = false;
+let interjectActive = false;
+let pendingDelay = [];
 
 const statusIcon = {
   sent: '✓',
   delivered: '✓✓',
   read: '✓✓',
+};
+
+const taskLabels = {
+  task_start: 'Task start',
+  task_update: 'Task update',
+  task_complete: 'Task complete',
 };
 
 function setViewportHeight() {
@@ -37,6 +50,7 @@ function setViewportHeight() {
 setViewportHeight();
 window.visualViewport?.addEventListener('resize', setViewportHeight);
 window.addEventListener('orientationchange', setViewportHeight);
+setInterval(updateDelayWarning, 500);
 
 joinForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -53,20 +67,42 @@ composer.addEventListener('submit', (event) => {
   const text = messageInput.value.trim();
   if (!text || !roomCode) return;
 
-  socket.emit('send-message', { roomCode, text, emergencyInterject: emergencyMode });
+  const taskState = roleSelect.value === 'ai' ? taskStateSelect.value : 'none';
+  const taskDescription = roleSelect.value === 'ai' ? taskDescriptionInput.value.trim() : '';
+
+  if (taskState !== 'none' && !taskDescription) {
+    landingError.textContent = 'Please add a task description when using a task flag.';
+    return;
+  }
+
+  landingError.textContent = '';
+  socket.emit('send-message', {
+    roomCode,
+    text,
+    emergencyInterject: emergencyMode,
+    taskState,
+    taskDescription,
+  });
   messageInput.value = '';
   messageInput.focus();
+
+  if (roleSelect.value === 'ai') {
+    taskStateSelect.value = 'none';
+    taskDescriptionInput.value = '';
+  }
 
   if (emergencyMode) {
     emergencyMode = false;
     interjectWarning.classList.add('hidden');
-    emergencyBtn.textContent = 'Emergency interject';
+    emergencyBtn.textContent = 'Interject before AI sees delayed message';
   }
 });
 
 roleSelect.addEventListener('change', () => {
   if (!roomCode) return;
   socket.emit('set-role', { roomCode, role: roleSelect.value });
+  updateRoleUi();
+  markVisibleAsRead();
 });
 
 pauseBtn.addEventListener('click', () => {
@@ -77,14 +113,21 @@ pauseBtn.addEventListener('click', () => {
 });
 
 emergencyBtn.addEventListener('click', () => {
+  if (!roomCode) return;
   emergencyMode = !emergencyMode;
+  if (emergencyMode) {
+    socket.emit('start-interject', { roomCode });
+  }
   interjectWarning.classList.toggle('hidden', !emergencyMode);
-  emergencyBtn.textContent = emergencyMode ? 'Emergency ON (next message)' : 'Emergency interject';
+  emergencyBtn.textContent = emergencyMode ? 'Interject armed (send next human message)' : 'Interject before AI sees delayed message';
 });
 
-socket.on('chat-history', ({ messages, pauseAi: initialPauseAi }) => {
+socket.on('chat-history', ({ messages, pauseAi: initialPauseAi, interjectActive: activeInterject, pendingDelay: initialPendingDelay }) => {
   pauseAi = Boolean(initialPauseAi);
+  interjectActive = Boolean(activeInterject);
+  pendingDelay = Array.isArray(initialPendingDelay) ? initialPendingDelay : [];
   updatePauseUi();
+  updateDelayWarning();
   messagesEl.innerHTML = '';
   messageState.clear();
 
@@ -125,6 +168,16 @@ socket.on('pause-updated', ({ pauseAi: serverPause }) => {
   updatePauseUi();
 });
 
+socket.on('interject-updated', ({ active }) => {
+  interjectActive = Boolean(active);
+  interjectWarning.classList.toggle('hidden', !interjectActive);
+});
+
+socket.on('pending-delay-update', ({ pending }) => {
+  pendingDelay = Array.isArray(pending) ? pending : [];
+  updateDelayWarning();
+});
+
 socket.on('release-held-messages', ({ messageIds }) => {
   for (const id of messageIds) {
     const bubble = document.querySelector(`[data-message-id="${id}"]`);
@@ -144,12 +197,16 @@ function renderMessage(message) {
   const mine = message.senderSocketId === socket.id;
   const canSee = !message.heldForAi || roleSelect.value === 'human' || mine;
   const color = message.status === 'read' ? 'var(--ok)' : '#bfdbfe';
+  const taskBadge = message.taskState && message.taskState !== 'none'
+    ? `<div class="task-badge">${taskLabels[message.taskState] || message.taskState}${message.taskDescription ? ` · ${escapeHtml(message.taskDescription)}` : ''}</div>`
+    : '';
 
   const wrapper = document.createElement('article');
   wrapper.className = `message ${mine ? 'me' : ''} ${canSee ? '' : 'hidden'}`.trim();
   wrapper.dataset.messageId = message.id;
 
   wrapper.innerHTML = `
+    ${taskBadge}
     <div>${escapeHtml(message.body)}</div>
     <div class="meta">
       <span>${new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -171,6 +228,27 @@ function updateStatus(messageId, status) {
 function updatePauseUi() {
   pauseBtn.textContent = pauseAi ? 'Resume AI routing' : 'Pause AI routing';
   pauseWarning.classList.toggle('hidden', !pauseAi);
+}
+
+function updateRoleUi() {
+  const isAi = roleSelect.value === 'ai';
+  aiReadme.classList.toggle('hidden', !isAi);
+  taskStateWrap.classList.toggle('hidden', !isAi);
+  taskDescriptionInput.classList.toggle('hidden', !isAi);
+}
+
+function updateDelayWarning() {
+  if (roleSelect.value !== 'human' || pendingDelay.length === 0) {
+    delayWarning.classList.add('hidden');
+    delayWarning.textContent = '';
+    return;
+  }
+
+  const now = Date.now();
+  const soonest = Math.min(...pendingDelay.map((item) => Number(item.releaseAt)));
+  const seconds = Math.max(0, Math.ceil((soonest - now) / 1000));
+  delayWarning.textContent = `AI-to-AI delay active: ${pendingDelay.length} pending message${pendingDelay.length === 1 ? '' : 's'}. Human interject window: ${seconds}s.`;
+  delayWarning.classList.remove('hidden');
 }
 
 function validateCode(code) {
@@ -226,6 +304,7 @@ function enterRoom(code) {
   landingScreen.classList.add('hidden');
   chatScreen.classList.remove('hidden');
 
+  updateRoleUi();
   socket.emit('join-room', { roomCode, role: roleSelect.value });
   messageInput.focus();
 }
