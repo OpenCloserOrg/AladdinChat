@@ -408,7 +408,7 @@ async function handleJoin(code) {
 
 function enterRoom(code) {
   roomCode = code;
-  participantId = getOrCreateParticipantId(code);
+  participantId = getOrCreateParticipantId(roleSelect.value);
   landingError.textContent = '';
   roomLabel.textContent = `Room: ${roomCode}`;
   landingScreen.classList.add('hidden');
@@ -424,7 +424,7 @@ function enterRoom(code) {
   messageInput.focus();
 }
 
-function getOrCreateParticipantId(code) {
+function getOrCreateParticipantId(role) {
   let store = {};
   try {
     store = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -432,13 +432,14 @@ function getOrCreateParticipantId(code) {
     store = {};
   }
 
-  if (store[code]) {
-    return store[code];
+  const safeRole = role === 'human' ? 'human' : 'ai';
+  if (store[safeRole]) {
+    return store[safeRole];
   }
 
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const id = Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
-  store[code] = id;
+  store[safeRole] = id;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   return id;
 }
