@@ -1,4 +1,5 @@
 const socketUrl = window.ALADDIN_SOCKET_URL || undefined;
+const apiBaseUrl = (window.ALADDIN_API_URL || window.ALADDIN_SOCKET_URL || '').replace(/\/$/, '');
 const socket = window.io ? io(socketUrl) : null;
 
 if (!socket) {
@@ -357,9 +358,10 @@ function updateDelayWarning() {
 
 async function checkSetupStatus() {
   try {
-    const response = await fetch('/api/setup-status');
+    const response = await fetch(buildApiUrl('/api/setup-status'));
     if (!response.ok) return;
-    const payload = await response.json();
+    const payload = await safeReadJson(response);
+    if (!payload) return;
     const ready = Boolean(payload.ready);
 
     joinForm.querySelector('button').disabled = !ready;
@@ -395,15 +397,20 @@ async function handleCreate(code) {
     return;
   }
 
-  const response = await fetch('/api/rooms', {
+  const response = await fetch(buildApiUrl('/api/rooms'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
   });
 
-  const payload = await response.json();
+  const payload = await safeReadJson(response);
   if (!response.ok) {
-    landingError.textContent = payload.error || 'Unable to create room.';
+    landingError.textContent = payload?.error || 'Unable to create room.';
+    return;
+  }
+
+  if (!payload?.roomCode) {
+    landingError.textContent = 'Server response was empty. Check ALADDIN_API_URL/ALADDIN_SOCKET_URL deployment settings.';
     return;
   }
 
@@ -416,19 +423,40 @@ async function handleJoin(code) {
     return;
   }
 
-  const response = await fetch('/api/rooms/join', {
+  const response = await fetch(buildApiUrl('/api/rooms/join'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
   });
 
-  const payload = await response.json();
+  const payload = await safeReadJson(response);
   if (!response.ok) {
-    landingError.textContent = payload.error || 'Unable to join room.';
+    landingError.textContent = payload?.error || 'Unable to join room.';
+    return;
+  }
+
+  if (!payload?.roomCode) {
+    landingError.textContent = 'Server response was empty. Check ALADDIN_API_URL/ALADDIN_SOCKET_URL deployment settings.';
     return;
   }
 
   enterRoom(payload.roomCode);
+}
+
+function buildApiUrl(path) {
+  if (!apiBaseUrl) return path;
+  return `${apiBaseUrl}${path}`;
+}
+
+async function safeReadJson(response) {
+  const raw = await response.text();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function enterRoom(code) {
