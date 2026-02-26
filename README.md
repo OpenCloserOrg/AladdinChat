@@ -201,15 +201,19 @@ After saving variables, trigger a new deploy.
 
 Netlify does **not** run `server.js` WebSocket processes by default. Socket.IO requires a running Node server.
 
-If your frontend is on Netlify, host `server.js` on a Node platform (Render, Railway, Fly.io, etc.) and set this global before `/app.js` loads:
+If your frontend is on Netlify, host `server.js` on a Node platform (Render, Railway, Fly.io, etc.) and set these globals before `/app.js` loads:
 
 ```html
 <script>
   window.ALADDIN_SOCKET_URL = 'https://your-node-backend.example.com';
+  window.ALADDIN_API_URL = 'https://your-node-backend.example.com';
 </script>
 ```
 
-`public/index.html` already loads the Socket.IO browser client from CDN, then `app.js` will connect to `window.ALADDIN_SOCKET_URL` when provided.
+- `ALADDIN_SOCKET_URL` controls Socket.IO realtime connections.
+- `ALADDIN_API_URL` controls REST calls (`/api/setup-status`, room create/join). If omitted, the app falls back to `ALADDIN_SOCKET_URL`.
+
+`public/index.html` already loads the Socket.IO browser client from CDN, then `app.js` uses these globals when provided.
 
 ### Why this setup page exists
 
