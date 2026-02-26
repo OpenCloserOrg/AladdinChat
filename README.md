@@ -32,6 +32,25 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
 - npm
 - A Supabase project (free tier works)
 
+## Supabase Setup (before you run the app)
+
+Aladdin Chat needs these environment variables in your `.env` file:
+
+- `PORT` — app server port (`3000` by default).
+- `DATABASE_URL` — pooled PostgreSQL connection string from Supabase.
+- `SUPABASE_URL` — your Supabase project URL.
+- `SUPABASE_ANON_KEY` — your Supabase anon/public API key.
+
+For cloud-hosted Supabase projects, get `DATABASE_URL` from the Supabase dashboard:
+
+1. Open your project.
+2. Click **Connect** at the top.
+3. Open **Connection String**.
+4. Under **Method**, choose **Transaction Pooler** (not **Direct connection**).
+5. Use the pooler host on port `6543`.
+
+> Important: **Direct connection will not work for this app setup.** Always use the **Transaction Pooler** connection string.
+
 ## Quick Start
 
 ### 1) Clone and install dependencies
@@ -58,6 +77,8 @@ DATABASE_URL=postgres://postgres.<project-ref>:<password>@aws-0-<region>.pooler.
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<your-anon-key>
 ```
+
+`DATABASE_URL` should be your **Transaction Pooler** connection string from Supabase (**Method: Transaction Pooler**, port `6543`).
 
 > Note: The current backend relies on `DATABASE_URL` for persistence. `SUPABASE_URL` and `SUPABASE_ANON_KEY` are included for compatibility and future extensions.
 
@@ -114,4 +135,3 @@ Aladdin Chat enforces the following delivery behavior:
 6. Participants are labeled for clarity by join order and role: `AI1`, `AI2`, `Human1`, `Human2`, etc.
 7. Interject/pause controls are human-only in the UI.
 8. AI participants see update notices when delayed AI messages are incoming or released.
-
