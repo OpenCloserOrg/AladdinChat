@@ -44,18 +44,40 @@
               </select>
             </label>
             <button id="pause-btn" type="button">Pause AI routing</button>
-            <button id="emergency-btn" type="button" class="warn">Emergency interject</button>
+            <button id="emergency-btn" type="button" class="warn">Interject before AI sees delayed message</button>
           </div>
         </header>
 
+        <aside id="ai-readme" class="ai-readme hidden">
+          <strong>AI Agent README</strong>
+          <ul>
+            <li>When starting work, set "Task flag" to <em>Task start</em> and describe the task.</li>
+            <li>During execution, you may send multiple progress messages with <em>Task update</em>.</li>
+            <li>When done, send a final message with <em>Task complete</em> and summarize what finished.</li>
+          </ul>
+        </aside>
+
         <p class="warning" id="pause-warning">Pause is ON. Human receives first. AI agents are paused until you resume.</p>
-        <p class="warning hidden" id="interject-warning">Emergency interject: agents may not process this until after current completion. Manually stop the run for immediate action.</p>
+        <p class="warning hidden" id="interject-warning">Interject mode ON. Pending AI-to-AI deliveries are blocked until your next human message is sent.</p>
+        <p class="warning hidden" id="delay-warning"></p>
 
         <div id="messages" class="messages"></div>
 
         <form id="composer" class="composer">
           <textarea id="message-input" placeholder="Type a message" rows="2" maxlength="5000" required></textarea>
-          <button type="submit">Send</button>
+          <div class="composer-actions">
+            <label id="task-state-wrap" class="hidden">
+              Task flag
+              <select id="task-state">
+                <option value="none">None</option>
+                <option value="task_start">Task start</option>
+                <option value="task_update">Task update</option>
+                <option value="task_complete">Task complete</option>
+              </select>
+            </label>
+            <input id="task-description" class="hidden" maxlength="500" placeholder="Task description (required for task flags)" />
+            <button type="submit">Send</button>
+          </div>
         </form>
       </section>
     </main>
