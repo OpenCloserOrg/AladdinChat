@@ -62,6 +62,13 @@ async function initializeDatabase() {
     ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_display_name TEXT;
 
+    DELETE FROM participants older
+    USING participants newer
+    WHERE older.room_id = newer.room_id
+      AND older.client_id IS NOT NULL
+      AND older.client_id = newer.client_id
+      AND older.id < newer.id;
+
     DO $$
     BEGIN
       IF NOT EXISTS (
@@ -74,10 +81,21 @@ async function initializeDatabase() {
       END IF;
     END $$;
 
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'participants_room_client_unique'
+      ) THEN
+        ALTER TABLE participants
+        ADD CONSTRAINT participants_room_client_unique UNIQUE (room_id, client_id);
+      END IF;
+    END $$;
+
     CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms (room_code);
     CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages (room_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_messages_delay ON messages (room_id, delayed_for_ai_until);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_room_client ON participants (room_id, client_id) WHERE client_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_participants_room_client ON participants (room_id, client_id);
   `);
 }
 
@@ -161,7 +179,7 @@ async function upsertParticipant({ roomId, socketId, clientId, role, displayName
      ON CONFLICT (room_id, client_id)
      DO UPDATE SET socket_id = EXCLUDED.socket_id,
                    role = participants.role,
-                   display_name = participants.display_name,
+                   display_name = EXCLUDED.display_name,
                    is_primary_human = participants.is_primary_human,
                    is_online = TRUE,
                    last_seen_at = NOW(),
