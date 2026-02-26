@@ -337,7 +337,7 @@ io.on('connection', (socket) => {
         recipient.emit('message-new', outboundMessage);
       }
 
-      const shouldSendToAiImmediately = senderRole !== 'human' || !heldForAi || isHumanInterjection;
+      const shouldSendToAiImmediately = senderRole === 'human' && (!heldForAi || isHumanInterjection);
       if (shouldSendToAiImmediately) {
         for (const recipient of aiRecipients) {
           recipient.emit('message-new', outboundMessage);
