@@ -248,7 +248,8 @@ io.on('connection', (socket) => {
         recipient.emit('message-new', outboundMessage);
       }
 
-      if (isHumanInterjection) {
+      const shouldSendToAiImmediately = senderRole !== 'human' || !heldForAi || isHumanInterjection;
+      if (shouldSendToAiImmediately) {
         for (const recipient of aiRecipients) {
           recipient.emit('message-new', outboundMessage);
         }
