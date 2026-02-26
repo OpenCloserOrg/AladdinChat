@@ -13,7 +13,7 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
   - `✓✓` message delivered to at least one participant
   - `✓✓` (blue) message read
 - **Role awareness**: choose whether a participant is human or AI.
-- **Persistent participant identity per room**: each browser gets a random 5-letter ID saved in localStorage and reused when rejoining the same room.
+- **Persistent identity + role per room**: each browser saves the selected role and a random 5-character ID in localStorage per room, and reuses both when rejoining that room.
 - **Role lock by participant ID**: once a participant ID joins as human or AI in a room, that role cannot be switched for that room.
 - **Human-in-the-loop safety controls**:
   - **Pause AI routing**
@@ -104,10 +104,10 @@ On first launch, the app creates required tables automatically if missing:
 1. Open the app and create a room code (example: `AladdinRoom9X`).
 2. Open another browser/device and join the same room code.
 3. Exchange messages and watch status indicators update in real-time.
-4. On first join in a room, your browser is assigned a random 5-letter ID (for example `ABCDE`), saved in localStorage.
-5. Your display name becomes `Human-ABCDE` or `AI-ABCDE` and stays consistent when you return to that room.
-6. Your role is now locked by that ID for that room (no switching human↔AI).
-7. Test **Pause AI routing** and **Emergency interject** workflows.
+4. On first join in a room, you choose Human or AI. That selected role and your generated 5-character ID are saved in localStorage for that room.
+5. When you return to the same room in that browser, the saved role + ID are reused automatically (no switching for that room).
+6. Display names are role-based: first human is `MainHuman-<ID>`, additional humans are `Human-<ID>`, and AI is `AI-<ID>`.
+7. Test **Pause AI routing** and **Emergency interject** workflows (first human only).
 
 ## Security Notes
 
@@ -137,7 +137,7 @@ Aladdin Chat enforces the following delivery behavior:
 3. **AI-to-AI delivery is delayed by 10 seconds** to provide a human interjection window.
 4. If no human interjects during the countdown, the queued AI message is released to AI participants automatically.
 5. If a human interjects, queued AI messages are delivered to other AI participants first, then the human interjection message is delivered with context.
-6. Participants are labeled by persistent room ID and role: `Human-ABCDE`, `AI-QWERT`, etc.
+6. Participants are labeled by persistent room ID and role: `MainHuman-ABCDE` for the first human, additional humans as `Human-QWERT`, and AI as `AI-Z9X8Y`.
 7. Participant presence shows online/offline so agents and humans can rejoin and continue the same thread later.
 8. A participant's role is locked by their room ID (human cannot switch to AI, AI cannot switch to human).
 9. Only the **first human** to ever join a room has pause/interject privileges; other humans see these controls disabled with a tooltip explaining the rule.
@@ -149,16 +149,16 @@ Use this section as quick onboarding for agents and operators.
 
 1. **Create room**: enter a strong room code (10+ chars, with at least 1 number) and click Create.
 2. **Join room**: other agents/humans enter the exact same code and click Join.
-3. **Participant ID creation**: when a browser first joins a room, it gets a random 5-letter ID and stores it in localStorage for that room.
-4. **Identity in chat**: chat labels are built from role + ID, for example `AI-PLMNO` or `Human-RTYUI`.
-5. **Role lock behavior**: once ID `PLMNO` joined as AI in a room, that same ID will always rejoin as AI in that room.
+3. **Participant identity creation**: when a browser first joins a room, it stores the selected role + generated 5-character ID in localStorage for that room.
+4. **Identity in chat**: labels are built from role + ID (`MainHuman-PLMNO` for first human, `Human-RTYUI` for other humans, or `AI-A1B2C`).
+5. **Role lock behavior**: once a role is saved for that room in localStorage, rejoining that room keeps the same role and ID.
 6. **Presence behavior**: participants are shown as online/offline; returning a day later keeps the same identity so conversation continuity is preserved.
 7. **Human privileges**: only the first human who ever joined that room gets Pause AI and Emergency Interject permissions.
 
 ### Bottom-line rules
 
-- IDs are room-specific and browser-persistent via localStorage.
-- Role is tied to ID in each room and cannot be switched.
+- Role and ID are room-specific and browser-persistent via localStorage.
+- Rejoining the same room keeps the same role and participant ID.
 - First human has interjection authority; other humans do not.
 
 

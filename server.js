@@ -144,7 +144,9 @@ io.on('connection', (socket) => {
 
       socket.join(roomCode);
 
-      const displayName = existingParticipant?.display_name || `${safeRole === 'human' ? 'Human' : 'AI'}-${clientId}`;
+      const displayName = existingParticipant?.display_name || (safeRole === 'human'
+        ? `${isPrimaryHuman ? 'MainHuman' : 'Human'}-${clientId}`
+        : `AI-${clientId}`);
       socket.data.displayName = displayName;
       socket.data.isPrimaryHuman = isPrimaryHuman;
 

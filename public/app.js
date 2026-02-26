@@ -39,7 +39,7 @@ let roleLocked = false;
 let participantId = '';
 let isPrimaryHuman = false;
 
-const STORAGE_KEY = 'aladdinChatParticipantIds';
+const STORAGE_KEY = 'aladdinChatParticipantState';
 
 const statusIcon = {
   sent: '✓',
@@ -80,8 +80,9 @@ composer.addEventListener('submit', (event) => {
   const text = messageInput.value.trim();
   if (!text || !roomCode) return;
 
-  const taskState = roleSelect.value === 'ai' ? taskStateSelect.value : 'none';
-  const taskDescription = roleSelect.value === 'ai' ? taskDescriptionInput.value.trim() : '';
+  const currentRole = roleSelect.value;
+  const taskState = currentRole === 'ai' ? taskStateSelect.value : 'none';
+  const taskDescription = currentRole === 'ai' ? taskDescriptionInput.value.trim() : '';
 
   if (taskState !== 'none' && !taskDescription) {
     landingError.textContent = 'Please add a task description when using a task flag.';
@@ -99,7 +100,7 @@ composer.addEventListener('submit', (event) => {
   messageInput.value = '';
   messageInput.focus();
 
-  if (roleSelect.value === 'ai') {
+  if (currentRole === 'ai') {
     taskStateSelect.value = 'none';
     taskDescriptionInput.value = '';
   }
@@ -408,7 +409,9 @@ async function handleJoin(code) {
 
 function enterRoom(code) {
   roomCode = code;
-  participantId = getOrCreateParticipantId(roleSelect.value);
+  const participant = getOrCreateParticipantState(roomCode, roleSelect.value);
+  participantId = participant.clientId;
+  roleSelect.value = participant.role;
   landingError.textContent = '';
   roomLabel.textContent = `Room: ${roomCode}`;
   landingScreen.classList.add('hidden');
@@ -420,11 +423,11 @@ function enterRoom(code) {
   myDisplayName = '';
   identityLabel.textContent = '';
   updateRoleUi();
-  socket.emit('join-room', { roomCode, role: roleSelect.value, clientId: participantId });
+  socket.emit('join-room', { roomCode, role: participant.role, clientId: participant.clientId });
   messageInput.focus();
 }
 
-function getOrCreateParticipantId(role) {
+function getOrCreateParticipantState(code, selectedRole) {
   let store = {};
   try {
     store = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -432,16 +435,20 @@ function getOrCreateParticipantId(role) {
     store = {};
   }
 
-  const safeRole = role === 'human' ? 'human' : 'ai';
-  if (store[safeRole]) {
-    return store[safeRole];
+  if (store[code]?.clientId && ['human', 'ai'].includes(store[code].role)) {
+    return store[code];
   }
 
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const id = Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
-  store[safeRole] = id;
+  const role = selectedRole === 'human' ? 'human' : 'ai';
+  const clientId = createParticipantId();
+  store[code] = { role, clientId };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  return id;
+  return store[code];
+}
+
+function createParticipantId() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  return Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 }
 
 function markVisibleAsRead() {
