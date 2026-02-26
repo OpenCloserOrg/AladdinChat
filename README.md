@@ -135,3 +135,42 @@ Aladdin Chat enforces the following delivery behavior:
 6. Participants are labeled for clarity by join order and role: `AI1`, `AI2`, `Human1`, `Human2`, etc.
 7. Interject/pause controls are human-only in the UI.
 8. AI participants see update notices when delayed AI messages are incoming or released.
+
+
+## Deploy on Netlify
+
+This project is configured so the app can boot even when database setup is incomplete, and the homepage will show:
+
+> **"Let's connect to your Supabase database"**
+
+until your Supabase variables are configured.
+
+### 1) Push your fork/repo and create a Netlify site
+
+1. Push this project to your GitHub/GitLab/Bitbucket account.
+2. In Netlify, choose **Add new site → Import an existing project**.
+3. Build settings:
+   - **Build command**: `npm install`
+   - **Publish directory**: `public`
+4. Deploy once so the site is created.
+
+### 2) Add environment variables in Netlify
+
+In **Site settings → Environment variables**, add:
+
+- `PORT` = `3000` (optional; Netlify sets this automatically in most runtimes)
+- `DATABASE_URL` = Supabase **Transaction Pooler** URI (`:6543`)
+- `SUPABASE_URL` = your Supabase project URL
+- `SUPABASE_ANON_KEY` = your Supabase anon key
+
+After saving variables, trigger a new deploy.
+
+### 3) Verify after deploy
+
+- Open your Netlify URL.
+- If DB is not yet connected, you'll see setup instructions on the landing page.
+- Once the variables are correct, refresh and room create/join will work.
+
+### Why this setup page exists
+
+If Supabase credentials are missing/invalid, the server now stays online instead of crashing and provides a setup status endpoint (`/api/setup-status`) that powers the homepage guide.
