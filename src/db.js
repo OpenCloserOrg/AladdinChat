@@ -191,7 +191,7 @@ async function upsertParticipant({ roomId, socketId, clientId, role, displayName
 async function setParticipantOffline(socketId) {
   await pool.query(
     `UPDATE participants
-     SET is_online = FALSE, socket_id = NULL, last_seen_at = NOW(), updated_at = NOW()
+     SET is_online = FALSE, last_seen_at = NOW(), updated_at = NOW()
      WHERE socket_id = $1`,
     [socketId],
   );

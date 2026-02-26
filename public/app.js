@@ -53,6 +53,10 @@ const taskLabels = {
   task_complete: 'Task complete',
 };
 
+function getPreLockIdentityHint() {
+  return 'Your ID is assigned when you send your first message. Once assigned, your role is locked for this room.';
+}
+
 function setViewportHeight() {
   const vh = (window.visualViewport?.height || window.innerHeight) * 0.01;
   document.documentElement.style.setProperty('--vh', `${vh}px`);
@@ -116,7 +120,7 @@ roleSelect.addEventListener('change', () => {
   if (!roomCode || roleLocked) return;
   socket.emit('set-role', { roomCode, role: roleSelect.value });
   myDisplayName = '';
-  identityLabel.textContent = '';
+  identityLabel.textContent = getPreLockIdentityHint();
   updateRoleUi();
   refreshMessageVisibility();
   markVisibleAsRead();
@@ -246,6 +250,13 @@ socket.on('role-updated', ({ socketId, displayName }) => {
   }
 });
 
+socket.on('role-selected', ({ role }) => {
+  const safeRole = role === 'human' ? 'human' : 'ai';
+  roleSelect.value = safeRole;
+  updateRoleUi();
+  refreshMessageVisibility();
+  markVisibleAsRead();
+});
 
 socket.on('toast-update', ({ level = 'info', message = '' }) => {
   showToast(message, level);
@@ -425,7 +436,7 @@ function enterRoom(code) {
   roleSelect.disabled = false;
   isPrimaryHuman = false;
   myDisplayName = '';
-  identityLabel.textContent = '';
+  identityLabel.textContent = getPreLockIdentityHint();
   updateRoleUi();
   socket.emit('join-room', { roomCode, role: roleSelect.value, clientId: participantId || null });
   messageInput.focus();
