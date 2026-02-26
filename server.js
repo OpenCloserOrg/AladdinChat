@@ -3,7 +3,6 @@ const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 const dotenv = require('dotenv');
-const { v4: uuidv4 } = require('uuid');
 
 dotenv.config();
 
@@ -18,7 +17,11 @@ const {
   markRead,
   setRoomPause,
   getParticipantRoles,
+  getParticipantByClient,
   upsertParticipant,
+  setParticipantOffline,
+  listParticipants,
+  hasPrimaryHuman,
   markMessageReleased,
   blockMessageByInterject,
 } = require('./src/db');
@@ -28,7 +31,6 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const roomState = new Map();
-const roomParticipants = new Map();
 const AI_MESSAGE_DELAY_MS = 10_000;
 const dbState = {
   ready: false,
@@ -117,7 +119,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  socket.on('join-room', async ({ roomCode, role }) => {
+  socket.on('join-room', async ({ roomCode, role, clientId }) => {
     try {
       const room = await getRoomByCode(roomCode);
       if (!room) {
@@ -125,17 +127,35 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const safeRole = role === 'human' ? 'human' : 'ai';
+      if (!isValidClientId(clientId)) {
+        socket.emit('chat-error', 'Invalid participant ID. Please refresh and join again.');
+        return;
+      }
+
+      const existingParticipant = await getParticipantByClient(room.id, clientId);
+      const safeRole = existingParticipant?.role || (role === 'human' ? 'human' : 'ai');
+      const isPrimaryHuman = safeRole === 'human' && (!existingParticipant
+        ? !(await hasPrimaryHuman(room.id))
+        : Boolean(existingParticipant.is_primary_human));
+
       socket.data.roomCode = roomCode;
       socket.data.role = safeRole;
-      socket.data.clientId = uuidv4();
+      socket.data.clientId = clientId;
 
       socket.join(roomCode);
 
-      const displayName = assignDisplayName(roomCode, socket.id, safeRole);
+      const displayName = existingParticipant?.display_name || `${safeRole === 'human' ? 'Human' : 'AI'}-${clientId}`;
       socket.data.displayName = displayName;
+      socket.data.isPrimaryHuman = isPrimaryHuman;
 
-      await upsertParticipant({ roomId: room.id, socketId: socket.id, role: safeRole, displayName });
+      await upsertParticipant({
+        roomId: room.id,
+        socketId: socket.id,
+        clientId,
+        role: safeRole,
+        displayName,
+        isPrimaryHuman,
+      });
 
       const messages = await getMessages(room.id, safeRole, socket.id);
       const state = ensureRoomState(roomCode);
@@ -145,11 +165,9 @@ io.on('connection', (socket) => {
         interjectActive: state.interjectActive,
         pendingDelay: state.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
       });
+      socket.emit('role-locked', { role: safeRole, displayName, isPrimaryHuman });
 
-      io.to(roomCode).emit('participant-update', {
-        count: io.sockets.adapter.rooms.get(roomCode)?.size || 0,
-        participants: listParticipantDisplayNames(roomCode),
-      });
+      await emitParticipantUpdate(roomCode, room.id);
     } catch (error) {
       console.error('join-room error', error);
       socket.emit('chat-error', 'Unable to join room.');
@@ -157,30 +175,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('set-role', async ({ roomCode, role }) => {
-    if (!roomCode || !['human', 'ai'].includes(role)) {
-      return;
-    }
-
-    socket.data.role = role;
-
-    try {
-      const displayName = assignDisplayName(roomCode, socket.id, role);
-      socket.data.displayName = displayName;
-      const room = await getRoomByCode(roomCode);
-      if (room) {
-        await upsertParticipant({ roomId: room.id, socketId: socket.id, role, displayName });
-      }
-      io.to(roomCode).emit('role-updated', { socketId: socket.id, role, displayName });
-      io.to(roomCode).emit('participant-update', {
-        count: io.sockets.adapter.rooms.get(roomCode)?.size || 0,
-        participants: listParticipantDisplayNames(roomCode),
-      });
-    } catch (error) {
-      console.error('set-role error', error);
-    }
+    socket.emit('chat-error', 'Role is locked to your participant ID for this room.');
   });
 
   socket.on('toggle-pause-ai', async ({ roomCode, pauseAi }) => {
+    if (!socket.data.isPrimaryHuman) {
+      socket.emit('chat-error', 'Only the first human in this room can control pause/interjection.');
+      return;
+    }
     try {
       const room = await getRoomByCode(roomCode);
       if (!room) return;
@@ -207,7 +209,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('start-interject', async ({ roomCode }) => {
-    if (!roomCode || socket.data.role !== 'human') return;
+    if (!roomCode || socket.data.role !== 'human' || !socket.data.isPrimaryHuman) return;
     const state = ensureRoomState(roomCode);
     state.interjectActive = true;
 
@@ -372,13 +374,12 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     try {
       const roomCode = socket.data.roomCode;
-      await pool.query('DELETE FROM participants WHERE socket_id = $1', [socket.id]);
+      await setParticipantOffline(socket.id);
       if (roomCode) {
-        removeParticipant(roomCode, socket.id);
-        io.to(roomCode).emit('participant-update', {
-          count: io.sockets.adapter.rooms.get(roomCode)?.size || 0,
-          participants: listParticipantDisplayNames(roomCode),
-        });
+        const room = await getRoomByCode(roomCode);
+        if (room) {
+          await emitParticipantUpdate(roomCode, room.id);
+        }
       }
     } catch (error) {
       console.error('disconnect cleanup error', error);
@@ -394,55 +395,21 @@ function ensureRoomState(roomCode) {
   return roomState.get(roomCode);
 }
 
-function ensureParticipantState(roomCode) {
-  if (!roomParticipants.has(roomCode)) {
-    roomParticipants.set(roomCode, { humanOrder: [], aiOrder: [], names: new Map() });
-  }
-  return roomParticipants.get(roomCode);
-}
-
-function assignDisplayName(roomCode, socketId, role) {
-  const participantState = ensureParticipantState(roomCode);
-  const existing = participantState.names.get(socketId);
-  if (existing && existing.role === role) {
-    return existing.displayName;
-  }
-
-  if (existing) {
-    if (existing.role === 'human') {
-      participantState.humanOrder = participantState.humanOrder.filter((id) => id !== socketId);
-    } else {
-      participantState.aiOrder = participantState.aiOrder.filter((id) => id !== socketId);
-    }
-  }
-
-  const order = role === 'human' ? participantState.humanOrder : participantState.aiOrder;
-  order.push(socketId);
-  const displayName = `${role === 'human' ? 'Human' : 'AI'}${order.length}`;
-  participantState.names.set(socketId, { role, displayName });
-  return displayName;
-}
-
-function listParticipantDisplayNames(roomCode) {
-  const participantState = ensureParticipantState(roomCode);
-  return [...participantState.names.values()].map((entry) => entry.displayName);
-}
-
-function removeParticipant(roomCode, socketId) {
-  const participantState = ensureParticipantState(roomCode);
-  const existing = participantState.names.get(socketId);
-  if (!existing) return;
-
-  participantState.names.delete(socketId);
-  if (existing.role === 'human') {
-    participantState.humanOrder = participantState.humanOrder.filter((id) => id !== socketId);
-  } else {
-    participantState.aiOrder = participantState.aiOrder.filter((id) => id !== socketId);
-  }
-}
-
 function isValidCode(code) {
   return typeof code === 'string' && code.length >= 10 && /\d/.test(code);
+}
+
+function isValidClientId(clientId) {
+  return typeof clientId === 'string' && /^[A-Z0-9]{5}$/.test(clientId);
+}
+
+async function emitParticipantUpdate(roomCode, roomId) {
+  const participants = await listParticipants(roomId);
+  const onlineCount = participants.filter((participant) => participant.isOnline).length;
+  io.to(roomCode).emit('participant-update', {
+    count: onlineCount,
+    participants,
+  });
 }
 
 (async () => {

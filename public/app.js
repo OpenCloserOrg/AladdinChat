@@ -35,6 +35,11 @@ let interjectActive = false;
 let pendingDelay = [];
 let myDisplayName = '';
 let toastTimer = null;
+let roleLocked = false;
+let participantId = '';
+let isPrimaryHuman = false;
+
+const STORAGE_KEY = 'aladdinChatParticipantIds';
 
 const statusIcon = {
   sent: '✓',
@@ -107,7 +112,7 @@ composer.addEventListener('submit', (event) => {
 });
 
 roleSelect.addEventListener('change', () => {
-  if (!roomCode) return;
+  if (!roomCode || roleLocked) return;
   socket.emit('set-role', { roomCode, role: roleSelect.value });
   myDisplayName = '';
   identityLabel.textContent = '';
@@ -117,14 +122,14 @@ roleSelect.addEventListener('change', () => {
 });
 
 pauseBtn.addEventListener('click', () => {
-  if (!roomCode) return;
+  if (!roomCode || !isPrimaryHuman) return;
   pauseAi = !pauseAi;
   socket.emit('toggle-pause-ai', { roomCode, pauseAi });
   updatePauseUi();
 });
 
 emergencyBtn.addEventListener('click', () => {
-  if (!roomCode || roleSelect.value !== 'human') return;
+  if (!roomCode || roleSelect.value !== 'human' || !isPrimaryHuman) return;
   emergencyMode = !emergencyMode;
   if (emergencyMode) {
     socket.emit('start-interject', { roomCode });
@@ -204,10 +209,28 @@ socket.on('release-held-messages', ({ messageIds }) => {
 
 socket.on('participant-update', ({ count, participants = [] }) => {
   presence.textContent = `${count} participant${count === 1 ? '' : 's'} online`;
-  const ordered = Array.isArray(participants) ? participants.join(', ') : '';
+  const ordered = Array.isArray(participants)
+    ? participants
+      .map((participant) => {
+        const status = participant.isOnline ? 'online' : 'offline';
+        return `${participant.displayName} (${status})`;
+      })
+      .join(', ')
+    : '';
   if (ordered) {
     identityLabel.textContent = socket.id && myDisplayName ? `You are ${myDisplayName} · In room: ${ordered}` : `In room: ${ordered}`;
   }
+});
+
+
+socket.on('role-locked', ({ role, displayName, isPrimaryHuman: primary }) => {
+  roleLocked = true;
+  isPrimaryHuman = Boolean(primary);
+  roleSelect.value = role;
+  roleSelect.disabled = true;
+  myDisplayName = displayName || '';
+  identityLabel.textContent = myDisplayName ? `You are ${myDisplayName}` : '';
+  updateRoleUi();
 });
 
 
@@ -281,6 +304,11 @@ function updateRoleUi() {
   aiReadme.classList.toggle('hidden', !isAi);
   pauseBtn.classList.toggle('hidden', isAi);
   emergencyBtn.classList.toggle('hidden', isAi);
+  const controlsLocked = !isPrimaryHuman;
+  pauseBtn.disabled = controlsLocked;
+  emergencyBtn.disabled = controlsLocked;
+  pauseBtn.title = controlsLocked ? 'Only the first human to join this room can use pause/interjection controls.' : '';
+  emergencyBtn.title = controlsLocked ? 'Only the first human to join this room can use pause/interjection controls.' : '';
   taskStateWrap.classList.toggle('hidden', !isAi);
   taskDescriptionInput.classList.toggle('hidden', !isAi);
 }
@@ -380,16 +408,39 @@ async function handleJoin(code) {
 
 function enterRoom(code) {
   roomCode = code;
+  participantId = getOrCreateParticipantId(code);
   landingError.textContent = '';
   roomLabel.textContent = `Room: ${roomCode}`;
   landingScreen.classList.add('hidden');
   chatScreen.classList.remove('hidden');
 
+  roleLocked = false;
+  roleSelect.disabled = false;
+  isPrimaryHuman = false;
   myDisplayName = '';
   identityLabel.textContent = '';
   updateRoleUi();
-  socket.emit('join-room', { roomCode, role: roleSelect.value });
+  socket.emit('join-room', { roomCode, role: roleSelect.value, clientId: participantId });
   messageInput.focus();
+}
+
+function getOrCreateParticipantId(code) {
+  let store = {};
+  try {
+    store = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch {
+    store = {};
+  }
+
+  if (store[code]) {
+    return store[code];
+  }
+
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const id = Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  store[code] = id;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  return id;
 }
 
 function markVisibleAsRead() {

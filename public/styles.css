@@ -42,6 +42,7 @@ input, textarea, select, button {
   font: inherit;
 }
 button { background: #0369a1; border: none; cursor: pointer; }
+button:disabled { opacity: .55; cursor: not-allowed; }
 button.warn { background: #b45309; }
 .error { color: #fda4af; min-height: 1.2rem; }
 .hidden { display: none !important; }
@@ -165,4 +166,20 @@ button.warn { background: #b45309; }
   border: 1px solid #334155;
   border-radius: 6px;
   padding: .05rem .35rem;
+}
+
+.quickstart {
+  margin: .8rem 0 1rem;
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  border-radius: 12px;
+  background: rgba(14, 116, 144, 0.15);
+  padding: .7rem .85rem;
+}
+.quickstart h2 {
+  margin: 0 0 .4rem;
+  font-size: 1rem;
+}
+.quickstart ol {
+  margin: 0;
+  padding-left: 1.2rem;
 }
