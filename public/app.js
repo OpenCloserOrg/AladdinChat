@@ -7,6 +7,8 @@ const joinForm = document.getElementById('join-form');
 const createForm = document.getElementById('create-form');
 const joinCodeInput = document.getElementById('join-code');
 const createCodeInput = document.getElementById('create-code');
+const setupGuide = document.getElementById('setup-guide');
+const setupStatus = document.getElementById('setup-status');
 const roomLabel = document.getElementById('room-label');
 const messagesEl = document.getElementById('messages');
 const composer = document.getElementById('composer');
@@ -55,6 +57,8 @@ setViewportHeight();
 window.visualViewport?.addEventListener('resize', setViewportHeight);
 window.addEventListener('orientationchange', setViewportHeight);
 setInterval(updateDelayWarning, 500);
+void checkSetupStatus();
+setInterval(checkSetupStatus, 20000);
 
 joinForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -223,6 +227,12 @@ socket.on('chat-error', (error) => {
   landingError.textContent = error;
 });
 
+
+socket.on('connect_error', (error) => {
+  landingError.textContent = error?.message || 'Unable to connect yet. Please complete setup and refresh.';
+});
+
+
 function renderMessage(message) {
   const mine = message.senderSocketId === socket.id;
   const canSee = !message.heldForAi || roleSelect.value === 'human' || mine;
@@ -289,6 +299,37 @@ function updateDelayWarning() {
     ? `AI-to-AI delay active: ${pendingDelay.length} pending message${pendingDelay.length === 1 ? '' : 's'}. Human interject window: ${seconds}s.`
     : `Incoming update: ${pendingDelay.length} AI message${pendingDelay.length === 1 ? '' : 's'} waiting ${seconds}s for possible human interjection.`;
   delayWarning.classList.remove('hidden');
+}
+
+
+async function checkSetupStatus() {
+  try {
+    const response = await fetch('/api/setup-status');
+    if (!response.ok) return;
+    const payload = await response.json();
+    const ready = Boolean(payload.ready);
+
+    joinForm.querySelector('button').disabled = !ready;
+    createForm.querySelector('button').disabled = !ready;
+    joinCodeInput.disabled = !ready;
+    createCodeInput.disabled = !ready;
+
+    setupGuide.classList.toggle('hidden', ready);
+    if (!ready) {
+      setupStatus.textContent = payload.error
+        ? `Current status: ${payload.error}`
+        : 'Current status: missing database configuration.';
+      landingError.textContent = 'Database setup is incomplete. Finish Supabase setup first.';
+    } else {
+      setupStatus.textContent = '';
+      if (landingError.textContent.includes('Database setup is incomplete')) {
+        landingError.textContent = '';
+      }
+    }
+  } catch (error) {
+    setupGuide.classList.remove('hidden');
+    setupStatus.textContent = 'Unable to verify setup status right now. Please refresh in a moment.';
+  }
 }
 
 function validateCode(code) {

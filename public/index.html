@@ -27,6 +27,23 @@
           </form>
         </div>
         <p id="landing-error" class="error"></p>
+
+        <section id="setup-guide" class="setup-guide hidden">
+          <h2>Let's connect to your Supabase database</h2>
+          <p>
+            Your app is running, but the database is not connected yet. Follow the README setup steps, add the required
+            Netlify environment variables, then refresh this page.
+          </p>
+          <ol>
+            <li>Create a Supabase project and open <strong>Connect → Connection String</strong>.</li>
+            <li>Choose <strong>Transaction Pooler</strong> and copy the URI on port <strong>6543</strong>.</li>
+            <li>In Netlify: <strong>Site settings → Environment variables</strong>, add <code>DATABASE_URL</code>, <code>SUPABASE_URL</code>, <code>SUPABASE_ANON_KEY</code>.</li>
+            <li>Redeploy your site, then refresh this page.</li>
+          </ol>
+          <p class="tip">Once those variables are set correctly, room creation/join will immediately work.</p>
+          <p id="setup-status" class="error"></p>
+        </section>
+
       </section>
 
       <section class="chat hidden" id="chat-screen">

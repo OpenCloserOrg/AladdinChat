@@ -30,6 +30,11 @@ const io = new Server(server);
 const roomState = new Map();
 const roomParticipants = new Map();
 const AI_MESSAGE_DELAY_MS = 10_000;
+const dbState = {
+  ready: false,
+  checkedAt: null,
+  error: null,
+};
 
 const port = Number(process.env.PORT || 3000);
 
@@ -40,7 +45,28 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/setup-status', (req, res) => {
+  res.json({
+    ok: dbState.ready,
+    ready: dbState.ready,
+    checkedAt: dbState.checkedAt,
+    error: dbState.error,
+    requiredEnv: ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY'],
+  });
+});
+
+function ensureDatabaseReady(res) {
+  if (dbState.ready) return true;
+
+  res.status(503).json({
+    error: 'Database is not connected yet. Please finish Supabase setup and refresh.',
+    setupPath: '/api/setup-status',
+  });
+  return false;
+}
+
 app.post('/api/rooms', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
   const { code } = req.body;
   if (!isValidCode(code)) {
     return res.status(400).json({ error: 'Code must be at least 10 chars and include one number.' });
@@ -61,6 +87,7 @@ app.post('/api/rooms', async (req, res) => {
 });
 
 app.post('/api/rooms/join', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
   const { code } = req.body;
 
   if (!isValidCode(code)) {
@@ -78,6 +105,15 @@ app.post('/api/rooms/join', async (req, res) => {
     console.error('Failed to join room', error);
     return res.status(500).json({ error: 'Unable to join room.' });
   }
+});
+
+io.use((socket, next) => {
+  if (!dbState.ready) {
+    next(new Error('Database is not connected yet. Please configure Supabase env vars first.'));
+    return;
+  }
+
+  next();
 });
 
 io.on('connection', (socket) => {
@@ -412,11 +448,18 @@ function isValidCode(code) {
 (async () => {
   try {
     await initializeDatabase();
-    server.listen(port, () => {
-      console.log(`Aladdin Chat listening on http://localhost:${port}`);
-    });
+    dbState.ready = true;
+    dbState.checkedAt = new Date().toISOString();
+    dbState.error = null;
   } catch (error) {
-    console.error('Unable to start server', error);
-    process.exit(1);
+    dbState.ready = false;
+    dbState.checkedAt = new Date().toISOString();
+    dbState.error = error.message;
+    console.error('Unable to connect to database on startup.', error);
+    console.log('Server will still start so setup instructions can be shown in the browser.');
   }
+
+  server.listen(port, () => {
+    console.log(`Aladdin Chat listening on http://localhost:${port}`);
+  });
 })();

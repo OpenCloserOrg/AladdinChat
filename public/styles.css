@@ -143,3 +143,26 @@ button.warn { background: #b45309; }
   font-size: .86rem;
 }
 .rules ol { margin: .35rem 0 0; padding-left: 1.15rem; }
+
+
+.setup-guide {
+  margin-top: 1rem;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 12px;
+  background: rgba(2, 132, 199, 0.12);
+  padding: .85rem;
+}
+.setup-guide h2 {
+  margin-top: 0;
+  margin-bottom: .4rem;
+}
+.setup-guide ol {
+  margin: .4rem 0;
+  padding-left: 1.2rem;
+}
+.setup-guide code {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: .05rem .35rem;
+}
