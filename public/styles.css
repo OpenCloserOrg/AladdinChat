@@ -122,3 +122,24 @@ button.warn { background: #b45309; }
   .composer-actions { grid-template-columns: 1fr; }
   .header-actions { width: 100%; }
 }
+
+
+#identity-label { color: #93c5fd; display: block; margin-top: .2rem; }
+.sender { font-size: .72rem; color: #93c5fd; margin-bottom: .2rem; }
+.toast {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: .5rem .65rem;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  font-size: .9rem;
+}
+.toast[data-level="warning"] { border-color: #f59e0b; color: #fde68a; }
+.toast[data-level="success"] { border-color: #22c55e; color: #bbf7d0; }
+.rules {
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  padding-top: .55rem;
+  color: #cbd5e1;
+  font-size: .86rem;
+}
+.rules ol { margin: .35rem 0 0; padding-left: 1.15rem; }

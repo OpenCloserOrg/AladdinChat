@@ -23,6 +23,7 @@ async function initializeDatabase() {
       room_id BIGINT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
       socket_id TEXT NOT NULL UNIQUE,
       role TEXT NOT NULL CHECK (role IN ('human', 'ai')),
+      display_name TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -32,6 +33,7 @@ async function initializeDatabase() {
       room_id BIGINT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
       sender_socket_id TEXT NOT NULL,
       sender_role TEXT NOT NULL CHECK (sender_role IN ('human', 'ai')),
+      sender_display_name TEXT,
       body TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('sent', 'delivered', 'read')) DEFAULT 'sent',
       emergency_interject BOOLEAN NOT NULL DEFAULT FALSE,
@@ -49,6 +51,8 @@ async function initializeDatabase() {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS delayed_for_ai_until TIMESTAMPTZ;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS blocked_by_interject BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+    ALTER TABLE participants ADD COLUMN IF NOT EXISTS display_name TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_display_name TEXT;
 
     DO $$
     BEGIN
@@ -82,6 +86,7 @@ async function getMessages(roomId, viewerRole = 'human', viewerSocketId = '') {
   const isAiViewer = viewerRole === 'ai';
   const { rows } = await pool.query(
     `SELECT id, sender_socket_id AS "senderSocketId", sender_role AS "senderRole", body,
+            COALESCE(sender_display_name, sender_role) AS "senderDisplayName",
             status, emergency_interject AS "emergencyInterject", held_for_ai AS "heldForAi",
             task_state AS "taskState", task_description AS "taskDescription",
             delayed_for_ai_until AS "delayedForAiUntil", blocked_by_interject AS "blockedByInterject",
@@ -106,6 +111,7 @@ async function saveMessage({
   roomId,
   senderSocketId,
   senderRole,
+  senderDisplayName,
   body,
   status,
   emergencyInterject,
@@ -117,17 +123,28 @@ async function saveMessage({
   const { rows } = await pool.query(
     `INSERT INTO messages (
       room_id, sender_socket_id, sender_role, body, status, emergency_interject, held_for_ai,
-      task_state, task_description, delayed_for_ai_until
+      sender_display_name, task_state, task_description, delayed_for_ai_until
     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id, sender_socket_id AS "senderSocketId", sender_role AS "senderRole", body,
+               COALESCE(sender_display_name, sender_role) AS "senderDisplayName",
                status, emergency_interject AS "emergencyInterject", held_for_ai AS "heldForAi",
                task_state AS "taskState", task_description AS "taskDescription",
                delayed_for_ai_until AS "delayedForAiUntil", blocked_by_interject AS "blockedByInterject",
                released_at AS "releasedAt", created_at AS "createdAt"`,
-    [roomId, senderSocketId, senderRole, body, status, emergencyInterject, heldForAi, taskState, taskDescription, delayedForAiUntil],
+    [roomId, senderSocketId, senderRole, body, status, emergencyInterject, heldForAi, senderDisplayName, taskState, taskDescription, delayedForAiUntil],
   );
   return rows[0];
+}
+
+async function upsertParticipant({ roomId, socketId, role, displayName }) {
+  await pool.query(
+    `INSERT INTO participants (room_id, socket_id, role, display_name)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (socket_id)
+     DO UPDATE SET role = EXCLUDED.role, display_name = EXCLUDED.display_name, updated_at = NOW()`,
+    [roomId, socketId, role, displayName],
+  );
 }
 
 async function markDelivered(messageId) {
@@ -166,6 +183,7 @@ module.exports = {
   markRead,
   setRoomPause,
   getParticipantRoles,
+  upsertParticipant,
   markMessageReleased,
   blockMessageByInterject,
 };

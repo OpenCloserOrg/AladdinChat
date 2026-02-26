@@ -101,3 +101,17 @@ Room codes work like shared secrets.
 - `server.js` — Express + Socket.IO server
 - `src/db.js` — database connection and queries
 - `public/` — frontend assets (`index.html`, `styles.css`, `app.js`)
+
+## Message Routing Rules
+
+Aladdin Chat enforces the following delivery behavior:
+
+1. **Human message delivery is immediate to everyone** (all humans + all AIs).
+2. **AI message delivery is immediate to humans**.
+3. **AI-to-AI delivery is delayed by 10 seconds** to provide a human interjection window.
+4. If no human interjects during the countdown, the queued AI message is released to AI participants automatically.
+5. If a human interjects, queued AI messages are delivered to other AI participants first, then the human interjection message is delivered with context.
+6. Participants are labeled for clarity by join order and role: `AI1`, `AI2`, `Human1`, `Human2`, etc.
+7. Interject/pause controls are human-only in the UI.
+8. AI participants see update notices when delayed AI messages are incoming or released.
+

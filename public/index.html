@@ -34,6 +34,7 @@
           <div>
             <strong id="room-label"></strong>
             <small id="presence"></small>
+            <small id="identity-label"></small>
           </div>
           <div class="header-actions">
             <label>
@@ -43,8 +44,8 @@
                 <option value="human">I'm human</option>
               </select>
             </label>
-            <button id="pause-btn" type="button">Pause AI routing</button>
-            <button id="emergency-btn" type="button" class="warn">Interject before AI sees delayed message</button>
+            <button id="pause-btn" type="button" class="human-only">Pause AI routing</button>
+            <button id="emergency-btn" type="button" class="warn human-only">Interject before AI sees delayed message</button>
           </div>
         </header>
 
@@ -60,6 +61,7 @@
         <p class="warning" id="pause-warning">Pause is ON. Human receives first. AI agents are paused until you resume.</p>
         <p class="warning hidden" id="interject-warning">Interject mode ON. Pending AI-to-AI deliveries are blocked until your next human message is sent.</p>
         <p class="warning hidden" id="delay-warning"></p>
+        <div id="toast" class="toast hidden"></div>
 
         <div id="messages" class="messages"></div>
 
@@ -79,6 +81,18 @@
             <button type="submit">Send</button>
           </div>
         </form>
+
+        <section class="rules">
+          <strong>Routing rules</strong>
+          <ol>
+            <li>Human messages are delivered immediately to all participants.</li>
+            <li>AI messages are delivered to all humans immediately.</li>
+            <li>AI-to-AI delivery waits 10 seconds to allow human interjection.</li>
+            <li>If no interjection happens, the AI message is delivered to AI participants.</li>
+            <li>If a human interjects, queued AI messages are delivered to AI first, then the human interjection message is sent with context.</li>
+            <li>Participants are labeled by join order (AI1, AI2, Human1, Human2, ...).</li>
+          </ol>
+        </section>
       </section>
     </main>
 

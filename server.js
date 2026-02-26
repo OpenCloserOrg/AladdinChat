@@ -18,6 +18,7 @@ const {
   markRead,
   setRoomPause,
   getParticipantRoles,
+  upsertParticipant,
   markMessageReleased,
   blockMessageByInterject,
 } = require('./src/db');
@@ -27,6 +28,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const roomState = new Map();
+const roomParticipants = new Map();
 const AI_MESSAGE_DELAY_MS = 10_000;
 
 const port = Number(process.env.PORT || 3000);
@@ -94,6 +96,11 @@ io.on('connection', (socket) => {
 
       socket.join(roomCode);
 
+      const displayName = assignDisplayName(roomCode, socket.id, safeRole);
+      socket.data.displayName = displayName;
+
+      await upsertParticipant({ roomId: room.id, socketId: socket.id, role: safeRole, displayName });
+
       const messages = await getMessages(room.id, safeRole, socket.id);
       const state = ensureRoomState(roomCode);
       socket.emit('chat-history', {
@@ -103,14 +110,10 @@ io.on('connection', (socket) => {
         pendingDelay: state.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
       });
 
-      await pool.query(
-        `INSERT INTO participants (room_id, socket_id, role)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (socket_id) DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()`,
-        [room.id, socket.id, safeRole],
-      );
-
-      io.to(roomCode).emit('participant-update', { count: io.sockets.adapter.rooms.get(roomCode)?.size || 0 });
+      io.to(roomCode).emit('participant-update', {
+        count: io.sockets.adapter.rooms.get(roomCode)?.size || 0,
+        participants: listParticipantDisplayNames(roomCode),
+      });
     } catch (error) {
       console.error('join-room error', error);
       socket.emit('chat-error', 'Unable to join room.');
@@ -125,8 +128,17 @@ io.on('connection', (socket) => {
     socket.data.role = role;
 
     try {
-      await pool.query('UPDATE participants SET role = $1, updated_at = NOW() WHERE socket_id = $2', [role, socket.id]);
-      io.to(roomCode).emit('role-updated', { socketId: socket.id, role });
+      const displayName = assignDisplayName(roomCode, socket.id, role);
+      socket.data.displayName = displayName;
+      const room = await getRoomByCode(roomCode);
+      if (room) {
+        await upsertParticipant({ roomId: room.id, socketId: socket.id, role, displayName });
+      }
+      io.to(roomCode).emit('role-updated', { socketId: socket.id, role, displayName });
+      io.to(roomCode).emit('participant-update', {
+        count: io.sockets.adapter.rooms.get(roomCode)?.size || 0,
+        participants: listParticipantDisplayNames(roomCode),
+      });
     } catch (error) {
       console.error('set-role error', error);
     }
@@ -158,20 +170,35 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('start-interject', ({ roomCode }) => {
-    if (!roomCode) return;
+  socket.on('start-interject', async ({ roomCode }) => {
+    if (!roomCode || socket.data.role !== 'human') return;
     const state = ensureRoomState(roomCode);
     state.interjectActive = true;
 
-    for (const pending of state.pending) {
+    const pendingToQueue = [...state.pending].sort((a, b) => a.createdAt - b.createdAt);
+
+    for (const pending of pendingToQueue) {
       clearTimeout(pending.timer);
       pending.blocked = true;
-      blockMessageByInterject(pending.messageId).catch((error) => console.error('blockMessageByInterject error', error));
+      await blockMessageByInterject(pending.messageId);
+      const roomMembers = io.sockets.adapter.rooms.get(roomCode) || new Set();
+      for (const memberId of roomMembers) {
+        if (memberId === pending.senderSocketId) continue;
+        const memberSocket = io.sockets.sockets.get(memberId);
+        if (memberSocket?.data.role === 'ai') {
+          memberSocket.emit('message-new', pending.message);
+        }
+      }
+      await markMessageReleased(pending.messageId);
     }
 
     state.pending = [];
     io.to(roomCode).emit('interject-updated', { active: true });
     io.to(roomCode).emit('pending-delay-update', { pending: [] });
+    io.to(roomCode).emit('toast-update', {
+      level: 'warning',
+      message: 'Awaiting human interjection... queued AI messages were released to AI participants.',
+    });
   });
 
   socket.on('send-message', async ({ roomCode, text, emergencyInterject = false, taskState = 'none', taskDescription = '' }) => {
@@ -190,10 +217,12 @@ io.on('connection', (socket) => {
       const safeTaskDescription = String(taskDescription || '').trim().slice(0, 500);
       const delayedForAiUntil = senderRole === 'ai' ? new Date(Date.now() + AI_MESSAGE_DELAY_MS).toISOString() : null;
 
+      const senderDisplayName = socket.data.displayName || (senderRole === 'human' ? 'Human' : 'AI');
       const message = await saveMessage({
         roomId: room.id,
         senderSocketId: socket.id,
         senderRole,
+        senderDisplayName,
         body: cleanText,
         status: 'sent',
         emergencyInterject,
@@ -221,7 +250,9 @@ io.on('connection', (socket) => {
           messageId: message.id,
           senderSocketId: socket.id,
           releaseAt,
+          createdAt: Date.now(),
           blocked: false,
+          message,
           timer: setTimeout(async () => {
             const currentState = ensureRoomState(roomCode);
             currentState.pending = currentState.pending.filter((entry) => entry.messageId !== message.id);
@@ -236,6 +267,10 @@ io.on('connection', (socket) => {
                 }
               }
               await markMessageReleased(message.id);
+              io.to(roomCode).emit('toast-update', {
+                level: 'info',
+                message: 'AI delay window ended. Message is now delivered to AI participants.',
+              });
             }
 
             io.to(roomCode).emit('pending-delay-update', {
@@ -248,12 +283,20 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('pending-delay-update', {
           pending: state.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
         });
+        io.to(roomCode).emit('toast-update', {
+          level: 'info',
+          message: 'Incoming AI message: sent to humans now, AI delivery in 10s unless a human interjects.',
+        });
       }
 
       if (senderRole === 'human' && emergencyInterject) {
         const state = ensureRoomState(roomCode);
         state.interjectActive = false;
         io.to(roomCode).emit('interject-updated', { active: false });
+        io.to(roomCode).emit('toast-update', {
+          level: 'success',
+          message: 'Human interjection sent after queued AI message delivery.',
+        });
       }
 
       if (recipientSockets.length > 0) {
@@ -283,7 +326,11 @@ io.on('connection', (socket) => {
       const roomCode = socket.data.roomCode;
       await pool.query('DELETE FROM participants WHERE socket_id = $1', [socket.id]);
       if (roomCode) {
-        io.to(roomCode).emit('participant-update', { count: io.sockets.adapter.rooms.get(roomCode)?.size || 0 });
+        removeParticipant(roomCode, socket.id);
+        io.to(roomCode).emit('participant-update', {
+          count: io.sockets.adapter.rooms.get(roomCode)?.size || 0,
+          participants: listParticipantDisplayNames(roomCode),
+        });
       }
     } catch (error) {
       console.error('disconnect cleanup error', error);
@@ -291,11 +338,59 @@ io.on('connection', (socket) => {
   });
 });
 
+
 function ensureRoomState(roomCode) {
   if (!roomState.has(roomCode)) {
     roomState.set(roomCode, { interjectActive: false, pending: [] });
   }
   return roomState.get(roomCode);
+}
+
+function ensureParticipantState(roomCode) {
+  if (!roomParticipants.has(roomCode)) {
+    roomParticipants.set(roomCode, { humanOrder: [], aiOrder: [], names: new Map() });
+  }
+  return roomParticipants.get(roomCode);
+}
+
+function assignDisplayName(roomCode, socketId, role) {
+  const participantState = ensureParticipantState(roomCode);
+  const existing = participantState.names.get(socketId);
+  if (existing && existing.role === role) {
+    return existing.displayName;
+  }
+
+  if (existing) {
+    if (existing.role === 'human') {
+      participantState.humanOrder = participantState.humanOrder.filter((id) => id !== socketId);
+    } else {
+      participantState.aiOrder = participantState.aiOrder.filter((id) => id !== socketId);
+    }
+  }
+
+  const order = role === 'human' ? participantState.humanOrder : participantState.aiOrder;
+  order.push(socketId);
+  const displayName = `${role === 'human' ? 'Human' : 'AI'}${order.length}`;
+  participantState.names.set(socketId, { role, displayName });
+  return displayName;
+}
+
+function listParticipantDisplayNames(roomCode) {
+  const participantState = ensureParticipantState(roomCode);
+  return [...participantState.names.values()].map((entry) => entry.displayName);
+}
+
+function removeParticipant(roomCode, socketId) {
+  const participantState = ensureParticipantState(roomCode);
+  const existing = participantState.names.get(socketId);
+  if (!existing) return;
+
+  participantState.names.delete(socketId);
+  if (existing.role === 'human') {
+    participantState.humanOrder = participantState.humanOrder.filter((id) => id !== socketId);
+  } else {
+    participantState.aiOrder = participantState.aiOrder.filter((id) => id !== socketId);
+  }
 }
 
 function isValidCode(code) {
