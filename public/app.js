@@ -230,6 +230,10 @@ socket.on('role-locked', ({ role, displayName, isPrimaryHuman: primary }) => {
   roleSelect.value = role;
   roleSelect.disabled = true;
   myDisplayName = displayName || '';
+  participantId = extractParticipantId(displayName || '') || participantId;
+  if (roomCode && participantId) {
+    persistParticipantState(roomCode, role, participantId);
+  }
   identityLabel.textContent = myDisplayName ? `You are ${myDisplayName}` : '';
   updateRoleUi();
 });
@@ -409,9 +413,9 @@ async function handleJoin(code) {
 
 function enterRoom(code) {
   roomCode = code;
-  const participant = getOrCreateParticipantState(roomCode, roleSelect.value);
-  participantId = participant.clientId;
-  roleSelect.value = participant.role;
+  const participant = getStoredParticipantState(roomCode);
+  participantId = participant?.clientId || '';
+  roleSelect.value = participant?.role || roleSelect.value;
   landingError.textContent = '';
   roomLabel.textContent = `Room: ${roomCode}`;
   landingScreen.classList.add('hidden');
@@ -423,11 +427,11 @@ function enterRoom(code) {
   myDisplayName = '';
   identityLabel.textContent = '';
   updateRoleUi();
-  socket.emit('join-room', { roomCode, role: participant.role, clientId: participant.clientId });
+  socket.emit('join-room', { roomCode, role: roleSelect.value, clientId: participantId || null });
   messageInput.focus();
 }
 
-function getOrCreateParticipantState(code, selectedRole) {
+function getStoredParticipantState(code) {
   let store = {};
   try {
     store = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
@@ -439,16 +443,24 @@ function getOrCreateParticipantState(code, selectedRole) {
     return store[code];
   }
 
-  const role = selectedRole === 'human' ? 'human' : 'ai';
-  const clientId = createParticipantId();
-  store[code] = { role, clientId };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  return store[code];
+  return null;
 }
 
-function createParticipantId() {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  return Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+function persistParticipantState(code, role, clientId) {
+  let store = {};
+  try {
+    store = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch {
+    store = {};
+  }
+
+  store[code] = { role, clientId };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+}
+
+function extractParticipantId(displayName) {
+  const matched = String(displayName || '').match(/-([A-Z0-9]{5})$/);
+  return matched ? matched[1] : '';
 }
 
 function markVisibleAsRead() {
