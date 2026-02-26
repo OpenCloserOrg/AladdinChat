@@ -231,6 +231,9 @@ function renderMessage(message) {
   const taskBadge = message.taskState && message.taskState !== 'none'
     ? `<div class="task-badge">${taskLabels[message.taskState] || message.taskState}${message.taskDescription ? ` · ${escapeHtml(message.taskDescription)}` : ''}</div>`
     : '';
+  const interjectionBadge = (message.humanInterjection || message.emergencyInterject)
+    ? '<div class="task-badge">HUMAN interjection</div>'
+    : '';
 
   const wrapper = document.createElement('article');
   wrapper.className = `message ${mine ? 'me' : ''} ${canSee ? '' : 'hidden'}`.trim();
@@ -239,6 +242,7 @@ function renderMessage(message) {
   wrapper.innerHTML = `
     ${senderLabel}
     ${taskBadge}
+    ${interjectionBadge}
     <div>${escapeHtml(message.body)}</div>
     <div class="meta">
       <span>${new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

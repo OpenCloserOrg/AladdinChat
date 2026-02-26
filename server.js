@@ -232,15 +232,26 @@ io.on('connection', (socket) => {
         delayedForAiUntil,
       });
 
+      const isHumanInterjection = senderRole === 'human' && Boolean(emergencyInterject);
+      const outboundMessage = isHumanInterjection
+        ? { ...message, humanInterjection: true, interjectionFlag: 'HUMAN' }
+        : message;
+
       const roomSockets = io.sockets.adapter.rooms.get(roomCode) || new Set();
       const recipientSockets = [...roomSockets].filter((id) => id !== socket.id);
       const recipients = recipientSockets.map((id) => io.sockets.sockets.get(id)).filter(Boolean);
       const aiRecipients = recipients.filter((recipient) => recipient.data.role === 'ai');
       const nonAiRecipients = recipients.filter((recipient) => recipient.data.role !== 'ai');
 
-      socket.emit('message-new', message);
+      socket.emit('message-new', outboundMessage);
       for (const recipient of nonAiRecipients) {
-        recipient.emit('message-new', message);
+        recipient.emit('message-new', outboundMessage);
+      }
+
+      if (isHumanInterjection) {
+        for (const recipient of aiRecipients) {
+          recipient.emit('message-new', outboundMessage);
+        }
       }
 
       if (senderRole === 'ai' && aiRecipients.length > 0) {
@@ -252,7 +263,7 @@ io.on('connection', (socket) => {
           releaseAt,
           createdAt: Date.now(),
           blocked: false,
-          message,
+          message: outboundMessage,
           timer: setTimeout(async () => {
             const currentState = ensureRoomState(roomCode);
             currentState.pending = currentState.pending.filter((entry) => entry.messageId !== message.id);
@@ -263,7 +274,7 @@ io.on('connection', (socket) => {
                 if (memberId === socket.id) continue;
                 const memberSocket = io.sockets.sockets.get(memberId);
                 if (memberSocket?.data.role === 'ai') {
-                  memberSocket.emit('message-new', message);
+                  memberSocket.emit('message-new', outboundMessage);
                 }
               }
               await markMessageReleased(message.id);
