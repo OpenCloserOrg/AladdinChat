@@ -127,12 +127,12 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (!isValidClientId(clientId)) {
+      if (clientId && !isValidClientId(clientId)) {
         socket.emit('chat-error', 'Invalid participant ID. Please refresh and join again.');
         return;
       }
 
-      const existingParticipant = await getParticipantByClient(room.id, clientId);
+      const existingParticipant = clientId ? await getParticipantByClient(room.id, clientId) : null;
       const safeRole = existingParticipant?.role || (role === 'human' ? 'human' : 'ai');
       const isPrimaryHuman = safeRole === 'human' && (!existingParticipant
         ? !(await hasPrimaryHuman(room.id))
@@ -140,24 +140,24 @@ io.on('connection', (socket) => {
 
       socket.data.roomCode = roomCode;
       socket.data.role = safeRole;
-      socket.data.clientId = clientId;
+      socket.data.clientId = existingParticipant?.client_id || (isValidClientId(clientId) ? clientId : null);
 
       socket.join(roomCode);
 
-      const displayName = existingParticipant?.display_name || (safeRole === 'human'
-        ? `${isPrimaryHuman ? 'MainHuman' : 'Human'}-${clientId}`
-        : `AI-${clientId}`);
+      const displayName = existingParticipant?.display_name || '';
       socket.data.displayName = displayName;
       socket.data.isPrimaryHuman = isPrimaryHuman;
 
-      await upsertParticipant({
-        roomId: room.id,
-        socketId: socket.id,
-        clientId,
-        role: safeRole,
-        displayName,
-        isPrimaryHuman,
-      });
+      if (existingParticipant) {
+        await upsertParticipant({
+          roomId: room.id,
+          socketId: socket.id,
+          clientId: existingParticipant.client_id,
+          role: safeRole,
+          displayName: existingParticipant.display_name,
+          isPrimaryHuman: Boolean(existingParticipant.is_primary_human),
+        });
+      }
 
       const messages = await getMessages(room.id, safeRole, socket.id);
       const state = ensureRoomState(roomCode);
@@ -167,7 +167,14 @@ io.on('connection', (socket) => {
         interjectActive: state.interjectActive,
         pendingDelay: state.pending.map((entry) => ({ messageId: entry.messageId, releaseAt: entry.releaseAt })),
       });
-      socket.emit('role-locked', { role: safeRole, displayName, isPrimaryHuman });
+
+      if (existingParticipant) {
+        socket.emit('role-locked', {
+          role: safeRole,
+          displayName: existingParticipant.display_name,
+          isPrimaryHuman: Boolean(existingParticipant.is_primary_human),
+        });
+      }
 
       await emitParticipantUpdate(roomCode, room.id);
     } catch (error) {
@@ -247,6 +254,39 @@ io.on('connection', (socket) => {
     try {
       const room = await getRoomByCode(roomCode);
       if (!room) return;
+
+      if (!socket.data.clientId) {
+        let assignedClientId = createClientId();
+        while (await getParticipantByClient(room.id, assignedClientId)) {
+          assignedClientId = createClientId();
+        }
+
+        const assignedRole = socket.data.role === 'human' ? 'human' : 'ai';
+        const assignedPrimaryHuman = assignedRole === 'human' ? !(await hasPrimaryHuman(room.id)) : false;
+        const assignedDisplayName = assignedRole === 'human'
+          ? `${assignedPrimaryHuman ? 'MainHuman' : 'Human'}-${assignedClientId}`
+          : `AI-${assignedClientId}`;
+
+        await upsertParticipant({
+          roomId: room.id,
+          socketId: socket.id,
+          clientId: assignedClientId,
+          role: assignedRole,
+          displayName: assignedDisplayName,
+          isPrimaryHuman: assignedPrimaryHuman,
+        });
+
+        socket.data.clientId = assignedClientId;
+        socket.data.displayName = assignedDisplayName;
+        socket.data.isPrimaryHuman = assignedPrimaryHuman;
+
+        socket.emit('role-locked', {
+          role: assignedRole,
+          displayName: assignedDisplayName,
+          isPrimaryHuman: assignedPrimaryHuman,
+        });
+        await emitParticipantUpdate(roomCode, room.id);
+      }
 
       const cleanText = text.trim().slice(0, 5000);
       const senderRole = socket.data.role === 'human' ? 'human' : 'ai';
@@ -403,6 +443,15 @@ function isValidCode(code) {
 
 function isValidClientId(clientId) {
   return typeof clientId === 'string' && /^[A-Z0-9]{5}$/.test(clientId);
+}
+
+function createClientId() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let id = '';
+  for (let i = 0; i < 5; i += 1) {
+    id += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return id;
 }
 
 async function emitParticipantUpdate(roomCode, roomId) {

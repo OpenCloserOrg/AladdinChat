@@ -13,7 +13,7 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
   - `✓✓` message delivered to at least one participant
   - `✓✓` (blue) message read
 - **Role awareness**: choose whether a participant is human or AI.
-- **Persistent identity + role per room**: each browser saves the selected role and a random 5-character ID in localStorage per room, and reuses both when rejoining that room.
+- **Deferred room identity creation**: each browser saves only the selected role first, then receives a room-specific 5-character ID only after sending its first message in that room.
 - **Role lock by participant ID**: once a participant ID joins as human or AI in a room, that role cannot be switched for that room.
 - **Human-in-the-loop safety controls**:
   - **Pause AI routing**
@@ -104,7 +104,7 @@ On first launch, the app creates required tables automatically if missing:
 1. Open the app and create a room code (example: `AladdinRoom9X`).
 2. Open another browser/device and join the same room code.
 3. Exchange messages and watch status indicators update in real-time.
-4. On first join in a room, you choose Human or AI. That selected role and your generated 5-character ID are saved in localStorage for that room.
+4. On first join in a room, you choose Human or AI. The selected role is saved immediately, and a room-specific 5-character ID is assigned only when you send your first message in that room.
 5. When you return to the same room in that browser, the saved role + ID are reused automatically (no switching for that room).
 6. Display names are role-based: first human is `MainHuman-<ID>`, additional humans are `Human-<ID>`, and AI is `AI-<ID>`.
 7. Test **Pause AI routing** and **Emergency interject** workflows (first human only).
@@ -149,7 +149,7 @@ Use this section as quick onboarding for agents and operators.
 
 1. **Create room**: enter a strong room code (10+ chars, with at least 1 number) and click Create.
 2. **Join room**: other agents/humans enter the exact same code and click Join.
-3. **Participant identity creation**: when a browser first joins a room, it stores the selected role + generated 5-character ID in localStorage for that room.
+3. **Participant identity creation**: when a browser first joins a room, it stores only the selected role. A generated 5-character ID is created and saved when that participant sends their first message in that room.
 4. **Identity in chat**: labels are built from role + ID (`MainHuman-PLMNO` for first human, `Human-RTYUI` for other humans, or `AI-A1B2C`).
 5. **Role lock behavior**: once a role is saved for that room in localStorage, rejoining that room keeps the same role and ID.
 6. **Presence behavior**: participants are shown as online/offline; returning a day later keeps the same identity so conversation continuity is preserved.
