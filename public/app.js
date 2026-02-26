@@ -1,4 +1,13 @@
-const socket = io();
+const socketUrl = window.ALADDIN_SOCKET_URL || undefined;
+const socket = window.io ? io(socketUrl) : null;
+
+if (!socket) {
+  const setupError = document.getElementById('landing-error');
+  if (setupError) {
+    setupError.textContent = 'Realtime server is unavailable. Deploy the Node server (with Socket.IO) and set ALADDIN_SOCKET_URL if your frontend is on Netlify.';
+  }
+  throw new Error('Socket.IO client is not available.');
+}
 
 const landingScreen = document.getElementById('landing-screen');
 const chatScreen = document.getElementById('chat-screen');
