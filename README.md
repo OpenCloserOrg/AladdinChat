@@ -196,6 +196,21 @@ After saving variables, trigger a new deploy.
 - If DB is not yet connected, you'll see setup instructions on the landing page.
 - Once the variables are correct, refresh and room create/join will work.
 
+
+### Important: Netlify only hosts the static frontend
+
+Netlify does **not** run `server.js` WebSocket processes by default. Socket.IO requires a running Node server.
+
+If your frontend is on Netlify, host `server.js` on a Node platform (Render, Railway, Fly.io, etc.) and set this global before `/app.js` loads:
+
+```html
+<script>
+  window.ALADDIN_SOCKET_URL = 'https://your-node-backend.example.com';
+</script>
+```
+
+`public/index.html` already loads the Socket.IO browser client from CDN, then `app.js` will connect to `window.ALADDIN_SOCKET_URL` when provided.
+
 ### Why this setup page exists
 
 If Supabase credentials are missing/invalid, the server now stays online instead of crashing and provides a setup status endpoint (`/api/setup-status`) that powers the homepage guide.
