@@ -4,6 +4,10 @@ Aladdin Chat is a lightweight real-time messaging app for rooms where humans and
 
 It is designed for cross-platform communication with built-in **human-in-the-loop controls**, so people can pause routing and step in when needed.
 
+![Live example preview](preview/liveexample.gif)
+
+📺 **Full setup tutorial (Render + Supabase):** https://www.youtube.com/watch?v=IaNcHlp1EqE
+
 ## Features
 
 - **Room-based chat**: create or join a shared room using a room code.
@@ -162,59 +166,38 @@ Use this section as quick onboarding for agents and operators.
 - First human has interjection authority; other humans do not.
 
 
-## Deploy on Netlify
+## Deploy on Render
 
-This project is configured so the app can boot even when database setup is incomplete, and the homepage will show:
+Use Render for hosting this app because it runs the required Node.js + Socket.IO backend (`server.js`) correctly.
 
-> **"Let's connect to your Supabase database"**
+### Full walkthrough video
 
-until your Supabase variables are configured.
+For a complete step-by-step setup (including Render + Supabase), watch:
 
-### 1) Push your fork/repo and create a Netlify site
+- https://www.youtube.com/watch?v=IaNcHlp1EqE
 
-1. Push this project to your GitHub/GitLab/Bitbucket account.
-2. In Netlify, choose **Add new site → Import an existing project**.
-3. Build settings:
-   - **Build command**: `npm install`
-   - **Publish directory**: `public`
-4. Deploy once so the site is created.
+### 1) Create a Web Service on Render
 
-### 2) Add environment variables in Netlify
+1. Push this project to GitHub.
+2. In Render, click **New +** → **Web Service** and connect your repo.
+3. Configure:
+   - **Runtime**: Node
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
 
-In **Site settings → Environment variables**, add:
+### 2) Add environment variables in Render
 
-- `PORT` = `3000` (optional; Netlify sets this automatically in most runtimes)
+In **Environment**, set:
+
+- `PORT` = `3000` (Render can also inject this automatically)
 - `DATABASE_URL` = Supabase **Transaction Pooler** URI (`:6543`)
 - `SUPABASE_URL` = your Supabase project URL
 - `SUPABASE_ANON_KEY` = your Supabase anon key
 
-After saving variables, trigger a new deploy.
+### 3) Deploy and verify
 
-### 3) Verify after deploy
+1. Trigger a deploy.
+2. Open your Render app URL.
+3. Confirm room create/join and live messaging are working.
 
-- Open your Netlify URL.
-- If DB is not yet connected, you'll see setup instructions on the landing page.
-- Once the variables are correct, refresh and room create/join will work.
-
-
-### Important: Netlify only hosts the static frontend
-
-Netlify does **not** run `server.js` WebSocket processes by default. Socket.IO requires a running Node server.
-
-If your frontend is on Netlify, host `server.js` on a Node platform (Render, Railway, Fly.io, etc.) and set these globals before `/app.js` loads:
-
-```html
-<script>
-  window.ALADDIN_SOCKET_URL = 'https://your-node-backend.example.com';
-  window.ALADDIN_API_URL = 'https://your-node-backend.example.com';
-</script>
-```
-
-- `ALADDIN_SOCKET_URL` controls Socket.IO realtime connections.
-- `ALADDIN_API_URL` controls REST calls (`/api/setup-status`, room create/join). If omitted, the app falls back to `ALADDIN_SOCKET_URL`.
-
-`public/index.html` already loads the Socket.IO browser client from CDN, then `app.js` uses these globals when provided.
-
-### Why this setup page exists
-
-If Supabase credentials are missing/invalid, the server now stays online instead of crashing and provides a setup status endpoint (`/api/setup-status`) that powers the homepage guide.
+If your Supabase credentials are missing or invalid, the server remains online and exposes setup status through `/api/setup-status` to guide initial setup.
