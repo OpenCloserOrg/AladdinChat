@@ -50,6 +50,15 @@ async function initializeDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS participant_message_cursors (
+      room_id BIGINT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      client_id TEXT NOT NULL,
+      last_seen_created_at TIMESTAMPTZ,
+      last_seen_message_id UUID,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (room_id, client_id)
+    );
+
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS task_state TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS task_description TEXT;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS delayed_for_ai_until TIMESTAMPTZ;
@@ -132,6 +141,72 @@ async function getMessages(roomId, viewerRole = 'human', viewerSocketId = '') {
     [roomId, isAiViewer, viewerSocketId],
   );
   return rows;
+}
+
+async function getAllMessagesForParticipant(roomId, clientId) {
+  const participant = await getParticipantByClient(roomId, clientId);
+  if (!participant) return [];
+  return getMessages(roomId, participant.role, participant.socket_id || `api:${clientId}`);
+}
+
+async function getLatestMessagesForParticipant(roomId, clientId) {
+  const participant = await getParticipantByClient(roomId, clientId);
+  if (!participant) return [];
+
+  const cursor = await pool.query(
+    `SELECT last_seen_created_at AS "lastSeenCreatedAt", last_seen_message_id AS "lastSeenMessageId"
+     FROM participant_message_cursors
+     WHERE room_id = $1 AND client_id = $2`,
+    [roomId, clientId],
+  );
+
+  const lastSeenCreatedAt = cursor.rows[0]?.lastSeenCreatedAt || null;
+  const lastSeenMessageId = cursor.rows[0]?.lastSeenMessageId || null;
+  const isAiViewer = participant.role === 'ai';
+
+  const { rows } = await pool.query(
+    `SELECT id, sender_socket_id AS "senderSocketId", sender_role AS "senderRole", body,
+            COALESCE(sender_display_name, sender_role) AS "senderDisplayName",
+            status, emergency_interject AS "emergencyInterject", held_for_ai AS "heldForAi",
+            task_state AS "taskState", task_description AS "taskDescription",
+            delayed_for_ai_until AS "delayedForAiUntil", blocked_by_interject AS "blockedByInterject",
+            released_at AS "releasedAt", created_at AS "createdAt"
+     FROM messages
+     WHERE room_id = $1
+       AND (
+         $2::boolean = FALSE
+         OR sender_socket_id = $3
+         OR (
+           blocked_by_interject = FALSE
+           AND (delayed_for_ai_until IS NULL OR delayed_for_ai_until <= NOW())
+         )
+       )
+       AND (
+         $4::timestamptz IS NULL
+         OR created_at > $4
+         OR (created_at = $4 AND id::text > COALESCE($5::text, ''))
+       )
+     ORDER BY created_at ASC, id ASC`,
+    [roomId, isAiViewer, participant.socket_id || `api:${clientId}`, lastSeenCreatedAt, lastSeenMessageId],
+  );
+
+  return rows;
+}
+
+async function updateParticipantCursor(roomId, clientId, messages) {
+  if (!messages || messages.length === 0) return;
+  const lastMessage = messages[messages.length - 1];
+
+  await pool.query(
+    `INSERT INTO participant_message_cursors (room_id, client_id, last_seen_created_at, last_seen_message_id, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (room_id, client_id)
+     DO UPDATE SET
+       last_seen_created_at = EXCLUDED.last_seen_created_at,
+       last_seen_message_id = EXCLUDED.last_seen_message_id,
+       updated_at = NOW()`,
+    [roomId, clientId, lastMessage.createdAt, lastMessage.id],
+  );
 }
 
 async function saveMessage({
@@ -248,6 +323,9 @@ module.exports = {
   getRoomByCode,
   createRoom,
   getMessages,
+  getAllMessagesForParticipant,
+  getLatestMessagesForParticipant,
+  updateParticipantCursor,
   saveMessage,
   markDelivered,
   markRead,

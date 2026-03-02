@@ -24,6 +24,9 @@ const {
   hasPrimaryHuman,
   markMessageReleased,
   blockMessageByInterject,
+  getAllMessagesForParticipant,
+  getLatestMessagesForParticipant,
+  updateParticipantCursor,
 } = require('./src/db');
 
 const app = express();
@@ -66,6 +69,174 @@ function ensureDatabaseReady(res) {
   });
   return false;
 }
+
+
+
+app.post('/api/create', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
+
+  const roomCode = normalizeRoomCode(req.body.roomId || req.body.roomCode);
+  const role = normalizeRole(req.body.role);
+
+  if (!role) {
+    return res.status(400).json({ error: 'role is required and must be either "human" or "ai".' });
+  }
+
+  const targetRoomCode = roomCode || createRoomCode();
+
+  if (!isValidCode(targetRoomCode)) {
+    return res.status(400).json({ error: 'roomId must be at least 10 chars and include one number.' });
+  }
+
+  try {
+    const existing = await getRoomByCode(targetRoomCode);
+    if (existing) {
+      return res.status(409).json({ error: 'Room already exists. Use /api/join for existing rooms.' });
+    }
+
+    const room = await createRoom(targetRoomCode);
+    const identity = await ensureApiParticipant({ roomId: room.id, role, participantId: req.body.participantId });
+    const messages = await getAllMessagesForParticipant(room.id, identity.participantId);
+    await updateParticipantCursor(room.id, identity.participantId, messages);
+
+    return res.status(201).json({
+      roomId: room.room_code,
+      participantId: identity.participantId,
+      role: identity.role,
+      isPrimaryHuman: identity.isPrimaryHuman,
+      messages,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Failed to create room via REST API', error);
+    return res.status(500).json({ error: 'Unable to create room.' });
+  }
+});
+
+app.post('/api/join', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
+
+  const roomCode = normalizeRoomCode(req.body.roomId || req.body.roomCode);
+  const role = normalizeRole(req.body.role);
+
+  if (!roomCode || !isValidCode(roomCode)) {
+    return res.status(400).json({ error: 'roomId is required and must be at least 10 chars with one number.' });
+  }
+
+  if (!role) {
+    return res.status(400).json({ error: 'role is required and must be either "human" or "ai".' });
+  }
+
+  try {
+    const room = await getRoomByCode(roomCode);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found.' });
+    }
+
+    const identity = await ensureApiParticipant({ roomId: room.id, role, participantId: req.body.participantId });
+    const messages = await getAllMessagesForParticipant(room.id, identity.participantId);
+    await updateParticipantCursor(room.id, identity.participantId, messages);
+
+    return res.json({
+      roomId: room.room_code,
+      participantId: identity.participantId,
+      role: identity.role,
+      isPrimaryHuman: identity.isPrimaryHuman,
+      pauseAi: room.pause_ai,
+      messages,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Failed to join room via REST API', error);
+    return res.status(500).json({ error: 'Unable to join room.' });
+  }
+});
+
+app.get('/api/allMessages/:roomId', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
+
+  try {
+    const auth = await authenticateRestParticipant(req.params.roomId, req.query.participantId || req.header('x-participant-id'));
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+    const messages = await getAllMessagesForParticipant(auth.room.id, auth.participant.client_id);
+    await updateParticipantCursor(auth.room.id, auth.participant.client_id, messages);
+
+    return res.json({ roomId: auth.room.room_code, participantId: auth.participant.client_id, count: messages.length, messages });
+  } catch (error) {
+    console.error('Failed to fetch all messages via REST API', error);
+    return res.status(500).json({ error: 'Unable to fetch messages.' });
+  }
+});
+
+app.get('/api/getLatest/:roomId', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
+
+  try {
+    const auth = await authenticateRestParticipant(req.params.roomId, req.query.participantId || req.header('x-participant-id'));
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+    const messages = await getLatestMessagesForParticipant(auth.room.id, auth.participant.client_id);
+    await updateParticipantCursor(auth.room.id, auth.participant.client_id, messages);
+
+    return res.json({
+      roomId: auth.room.room_code,
+      participantId: auth.participant.client_id,
+      hasNewMessages: messages.length > 0,
+      message: messages.length === 0 ? 'No new messages.' : undefined,
+      messages,
+    });
+  } catch (error) {
+    console.error('Failed to fetch latest messages via REST API', error);
+    return res.status(500).json({ error: 'Unable to fetch latest messages.' });
+  }
+});
+
+app.post('/api/send/:roomId', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
+
+  const text = String(req.body.text || '').trim();
+  if (!text) {
+    return res.status(400).json({ error: 'text is required.' });
+  }
+
+  try {
+    const auth = await authenticateRestParticipant(req.params.roomId, req.body.participantId || req.query.participantId || req.header('x-participant-id'));
+    if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+    const senderRole = auth.participant.role === 'human' ? 'human' : 'ai';
+    const cleanText = text.slice(0, 5000);
+    const message = await saveMessage({
+      roomId: auth.room.id,
+      senderSocketId: `api:${auth.participant.client_id}`,
+      senderRole,
+      senderDisplayName: auth.participant.display_name || (senderRole === 'human' ? 'Human' : 'AI'),
+      body: cleanText,
+      status: 'sent',
+      emergencyInterject: false,
+      heldForAi: false,
+      taskState: 'none',
+      taskDescription: null,
+      delayedForAiUntil: null,
+    });
+
+    await markDelivered(message.id);
+    message.status = 'delivered';
+
+    return res.status(201).json({
+      roomId: auth.room.room_code,
+      participantId: auth.participant.client_id,
+      message,
+    });
+  } catch (error) {
+    console.error('Failed to send message via REST API', error);
+    return res.status(500).json({ error: 'Unable to send message.' });
+  }
+});
 
 app.post('/api/rooms', async (req, res) => {
   if (!ensureDatabaseReady(res)) return;
@@ -438,6 +609,114 @@ io.on('connection', (socket) => {
   });
 });
 
+
+
+
+function normalizeRole(role) {
+  if (role === 'human' || role === 'ai') return role;
+  return null;
+}
+
+function normalizeRoomCode(roomCode) {
+  if (typeof roomCode !== 'string') return '';
+  return roomCode.trim();
+}
+
+function isValidParticipantId(participantId) {
+  return typeof participantId === 'string' && /^[A-Z0-9]{20}$/.test(participantId) && /\d/.test(participantId);
+}
+
+function createRoomCode() {
+  return createRandomAlphaNumeric(20);
+}
+
+function createParticipantId() {
+  return createRandomAlphaNumeric(20);
+}
+
+function createRandomAlphaNumeric(length) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let output = '';
+  for (let i = 0; i < length; i += 1) {
+    output += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+
+  if (!/\d/.test(output)) {
+    const replaceIndex = Math.floor(Math.random() * output.length);
+    const digit = String(Math.floor(Math.random() * 10));
+    output = `${output.slice(0, replaceIndex)}${digit}${output.slice(replaceIndex + 1)}`;
+  }
+
+  return output;
+}
+
+async function ensureApiParticipant({ roomId, role, participantId }) {
+  const normalizedId = typeof participantId === 'string' ? participantId.trim().toUpperCase() : '';
+  if (normalizedId && !isValidParticipantId(normalizedId)) {
+    const error = new Error('participantId must be 20 chars (A-Z0-9) with at least one number.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let participant = normalizedId ? await getParticipantByClient(roomId, normalizedId) : null;
+  let finalParticipantId = normalizedId;
+
+  if (!participant && !finalParticipantId) {
+    finalParticipantId = createParticipantId();
+    while (await getParticipantByClient(roomId, finalParticipantId)) {
+      finalParticipantId = createParticipantId();
+    }
+  }
+
+  if (participant && participant.role !== role) {
+    const error = new Error(`participantId already belongs to role "${participant.role}" in this room.`);
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const isPrimaryHuman = role === 'human' && (!participant ? !(await hasPrimaryHuman(roomId)) : Boolean(participant.is_primary_human));
+  const displayName = participant?.display_name || (role === 'human'
+    ? `${isPrimaryHuman ? 'MainHuman' : 'Human'}-${finalParticipantId}`
+    : `AI-${finalParticipantId}`);
+
+  await upsertParticipant({
+    roomId,
+    socketId: `api:${finalParticipantId}`,
+    clientId: finalParticipantId,
+    role,
+    displayName,
+    isPrimaryHuman,
+  });
+
+  participant = await getParticipantByClient(roomId, finalParticipantId);
+
+  return {
+    participantId: finalParticipantId,
+    role: participant.role,
+    isPrimaryHuman: Boolean(participant.is_primary_human),
+    displayName: participant.display_name,
+  };
+}
+
+async function authenticateRestParticipant(roomCode, participantId) {
+  const normalizedRoomCode = normalizeRoomCode(roomCode);
+  if (!normalizedRoomCode || !isValidCode(normalizedRoomCode)) {
+    return { status: 400, error: 'Valid roomId path param is required.' };
+  }
+
+  const normalizedParticipantId = typeof participantId === 'string' ? participantId.trim().toUpperCase() : '';
+  if (!normalizedParticipantId || !isValidParticipantId(normalizedParticipantId)) {
+    return { status: 401, error: 'Valid participantId is required (query param or x-participant-id header).' };
+  }
+
+  const room = await getRoomByCode(normalizedRoomCode);
+  if (!room) return { status: 404, error: 'Room not found.' };
+
+  const participant = await getParticipantByClient(room.id, normalizedParticipantId);
+  if (!participant) return { status: 401, error: 'Participant is not registered in this room.' };
+
+  return { room, participant };
+}
 
 function ensureRoomState(roomCode) {
   if (!roomState.has(roomCode)) {
