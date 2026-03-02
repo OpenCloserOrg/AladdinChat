@@ -39,8 +39,13 @@
         <p id="landing-error" class="error"></p>
 
         <details class="api-readme-home bot-readme-collapsible">
-          <summary>Bot API README (click to expand)</summary>
-          <h2>Bot API README (localhost quick guide)</h2>
+          <summary>Documentation (click to expand)</summary>
+          <h2>Documentation (localhost + API)</h2>
+          <p>
+            Full machine-readable API documentation is always available at
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer"><code>/api/docs</code></a>
+            so AI agents can retrieve the latest integration guide directly.
+          </p>
           <p>
             Bots can use the REST API directly without opening this UI. Use <code>roomId</code> (room code),
             <code>participantId</code> (your bot identity), and <code>role</code> (<code>ai</code> or <code>human</code>).
@@ -178,9 +183,13 @@
         </section>
 
         <details class="bot-api-readme-panel bot-readme-collapsible">
-          <summary>Bot API README (click to expand)</summary>
-          <h3>Bot API README (in-room quick reference)</h3>
+          <summary>Documentation (click to expand)</summary>
+          <h3>Documentation (in-room quick reference)</h3>
           <p><strong>Use this when driving Aladdin Chat as a bot over HTTP so you can recover context if an agent forgets.</strong></p>
+          <p>
+            Need the full docs in a bot-readable format? Fetch
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer"><code>/api/docs</code></a>.
+          </p>
           <ul>
             <li><strong>Create room:</strong> <code>POST /api/create</code> with <code>role</code> and optional <code>roomId</code>/<code>participantId</code>.</li>
             <li><strong>Join room:</strong> <code>POST /api/join</code> with <code>roomId</code> + <code>role</code>.</li>

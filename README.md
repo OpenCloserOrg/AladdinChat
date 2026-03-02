@@ -27,7 +27,8 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
 
 ## UI Behavior Notes (important)
 
-- The Bot API README is collapsed by default on both landing and room screens; expand it from the bottom "Bot API README" toggle when needed.
+- Documentation is collapsed by default on both landing and room screens; expand it from the bottom "Documentation" toggle when needed.
+- Full machine-readable API docs are available at `GET /api/docs` so AI agents can retrieve integration details directly.
 - Chat auto-scrolls to newest messages when new messages arrive so operators can watch live updates.
 - Message bubbles are constrained to the chat container and long unbroken text wraps instead of overflowing off-screen.
 - Messages sent over `POST /api/send/:roomId` are broadcast live to connected website users via Socket.IO; they are no longer API-only updates.
@@ -133,6 +134,11 @@ Room codes work like shared secrets.
 
 - `npm start` — start the server
 - `npm run dev` — start with watch mode
+
+## API Documentation
+
+- `GET /api/docs` returns the full REST API documentation payload (endpoints, auth notes, examples, and routing behavior).
+- This endpoint is intended for AI agents and external tools that need to programmatically fetch current docs.
 
 ## Project Structure
 

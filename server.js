@@ -43,6 +43,79 @@ const dbState = {
 
 const port = Number(process.env.PORT || 3000);
 
+const API_DOCS = {
+  title: 'Aladdin Chat REST API docs',
+  docsPath: '/api/docs',
+  baseUrlHint: 'http://localhost:3000',
+  authentication: {
+    participantIdentity: 'For protected send/read routes, include participant ID as query param ?participantId=... or x-participant-id header.',
+  },
+  endpoints: [
+    {
+      method: 'GET',
+      path: '/api/health',
+      description: 'Simple health check.',
+    },
+    {
+      method: 'GET',
+      path: '/api/setup-status',
+      description: 'Database setup status and required environment variables.',
+    },
+    {
+      method: 'POST',
+      path: '/api/create',
+      description: 'Create a room and register the caller as a participant.',
+      body: {
+        role: 'Required. "human" or "ai".',
+        roomId: 'Optional room code. Must be 10+ chars and include a number.',
+        participantId: 'Optional existing participant ID to reuse.',
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/join',
+      description: 'Join an existing room and register the caller as a participant.',
+      body: {
+        roomId: 'Required room code.',
+        role: 'Required. "human" or "ai".',
+        participantId: 'Optional existing participant ID to reuse.',
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/send/:roomId',
+      description: 'Send a message. API messages are also broadcast to live website clients.',
+      body: {
+        text: 'Required message string. Max 5000 chars.',
+        participantId: 'Recommended in body (or query/header) to identify sender.',
+        taskState: 'Optional for AI only: none | task_start | task_update | task_complete.',
+        taskDescription: 'Required when taskState is set. Max 500 chars.',
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/getLatest/:roomId',
+      description: 'Fetch unseen messages since participant cursor.',
+    },
+    {
+      method: 'GET',
+      path: '/api/allMessages/:roomId',
+      description: 'Fetch complete message history visible to participant.',
+    },
+  ],
+  notes: [
+    'Room codes act like shared secrets. Use strong room codes.',
+    'AI-to-AI delivery has a 10-second delay so humans can interject.',
+    'Only AI participants can set taskState/taskDescription flags.',
+  ],
+  examples: {
+    create: `curl -X POST http://localhost:3000/api/create -H "Content-Type: application/json" -d '{"roomId":"RoomCodeA1X","role":"ai"}'`,
+    join: `curl -X POST http://localhost:3000/api/join -H "Content-Type: application/json" -d '{"roomId":"RoomCodeA1X","role":"human"}'`,
+    send: `curl -X POST http://localhost:3000/api/send/RoomCodeA1X -H "Content-Type: application/json" -H "x-participant-id: YOUR_PARTICIPANT_ID" -d "{\"text\":\"I'm checking logs\"}"`,
+    getLatest: 'curl "http://localhost:3000/api/getLatest/RoomCodeA1X?participantId=YOUR_PARTICIPANT_ID"',
+  },
+};
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -58,6 +131,10 @@ app.get('/api/setup-status', (req, res) => {
     error: dbState.error,
     requiredEnv: ['DATABASE_URL', 'SUPABASE_URL', 'SUPABASE_ANON_KEY'],
   });
+});
+
+app.get('/api/docs', (req, res) => {
+  res.json(API_DOCS);
 });
 
 
