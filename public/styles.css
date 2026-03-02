@@ -49,6 +49,14 @@ button { background: #0369a1; border: none; cursor: pointer; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 button.warn { background: #b45309; }
 .error { color: #fda4af; min-height: 1.2rem; }
+.top-notice {
+  margin: 0 0 .7rem;
+  border: 1px solid rgba(125, 211, 252, 0.55);
+  border-radius: 10px;
+  background: rgba(14, 116, 144, 0.2);
+  color: #bae6fd;
+  padding: .55rem .65rem;
+}
 .hidden { display: none !important; }
 .chat {
   display: flex;

@@ -13,6 +13,7 @@ if (!socket) {
 const landingScreen = document.getElementById('landing-screen');
 const chatScreen = document.getElementById('chat-screen');
 const landingError = document.getElementById('landing-error');
+const landingNotice = document.getElementById('landing-notice');
 const joinForm = document.getElementById('join-form');
 const createForm = document.getElementById('create-form');
 const joinCodeInput = document.getElementById('join-code');
@@ -88,6 +89,7 @@ window.addEventListener('orientationchange', setViewportHeight);
 setInterval(updateDelayWarning, 500);
 void checkSetupStatus();
 setInterval(checkSetupStatus, 20000);
+void initializeRoomFromUrl();
 
 joinForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -454,6 +456,63 @@ async function handleJoin(code) {
   enterRoom(payload.roomCode);
 }
 
+
+async function initializeRoomFromUrl() {
+  const roomFromPath = getRoomCodeFromPath();
+  const landingMessage = new URLSearchParams(window.location.search).get('notice');
+
+  if (landingMessage) {
+    showLandingNotice(landingMessage);
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, '', cleanUrl);
+  }
+
+  if (!roomFromPath) return;
+
+  if (!validateCode(roomFromPath)) {
+    redirectToLandingWithNotice(`Chat ${roomFromPath} does not exist yet. You can create it now.`);
+    return;
+  }
+
+  try {
+    const response = await fetch(buildApiUrl(`/api/rooms/${encodeURIComponent(roomFromPath)}`));
+    if (!response.ok) {
+      redirectToLandingWithNotice(`Chat ${roomFromPath} does not exist yet. You can create it now.`);
+      return;
+    }
+
+    const payload = await safeReadJson(response);
+    if (!payload?.roomCode) {
+      redirectToLandingWithNotice(`Chat ${roomFromPath} does not exist yet. You can create it now.`);
+      return;
+    }
+
+    enterRoom(payload.roomCode, { fromUrl: true });
+  } catch {
+    redirectToLandingWithNotice(`Chat ${roomFromPath} does not exist yet. You can create it now.`);
+  }
+}
+
+function getRoomCodeFromPath() {
+  const matched = window.location.pathname.match(/^\/rooms\/([^/]+)$/);
+  return matched ? decodeURIComponent(matched[1]).trim() : '';
+}
+
+function redirectToLandingWithNotice(message) {
+  const target = `/?notice=${encodeURIComponent(message)}`;
+  if (window.location.pathname === '/') {
+    showLandingNotice(message);
+    return;
+  }
+  window.location.replace(target);
+}
+
+function showLandingNotice(message) {
+  if (!landingNotice || !message) return;
+  landingNotice.textContent = message;
+  landingNotice.classList.remove('hidden');
+}
+
 function buildApiUrl(path) {
   if (!apiBaseUrl) return path;
   return `${apiBaseUrl}${path}`;
@@ -470,7 +529,8 @@ async function safeReadJson(response) {
   }
 }
 
-function enterRoom(code) {
+function enterRoom(code, options = {}) {
+  const { fromUrl = false } = options;
   roomCode = code;
   const participant = getStoredParticipantState(roomCode);
   participantId = participant?.clientId || '';
@@ -488,6 +548,10 @@ function enterRoom(code) {
   updateRoleUi();
   socket.emit('join-room', { roomCode, role: roleSelect.value, clientId: participantId || null });
   messageInput.focus();
+
+  if (!fromUrl) {
+    window.history.pushState({}, '', `/rooms/${encodeURIComponent(roomCode)}`);
+  }
 }
 
 function getStoredParticipantState(code) {
