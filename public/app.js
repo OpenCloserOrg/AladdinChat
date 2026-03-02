@@ -317,7 +317,7 @@ function renderMessage(message) {
     <div>${escapeHtml(message.body)}</div>
     <div class="meta">
       <span>${new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-      <span id="status-${message.id}" style="color:${color}">${statusIcon[message.status]}${message.status === 'read' ? ' (blue)' : ''}</span>
+      <span id="status-${message.id}" style="color:${color}">${statusIcon[message.status]}</span>
     </div>
   `;
 
@@ -327,7 +327,7 @@ function renderMessage(message) {
 function updateStatus(messageId, status) {
   const statusEl = document.getElementById(`status-${messageId}`);
   if (!statusEl) return;
-  statusEl.textContent = `${statusIcon[status]}${status === 'read' ? ' (blue)' : ''}`;
+  statusEl.textContent = `${statusIcon[status]}`;
   statusEl.style.color = status === 'read' ? 'var(--ok)' : '#bfdbfe';
 }
 

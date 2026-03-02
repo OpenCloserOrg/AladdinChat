@@ -60,6 +60,21 @@ app.get('/api/setup-status', (req, res) => {
   });
 });
 
+
+function getIncomingUnreadMessageIdsForParticipant(messages, participant) {
+  if (!Array.isArray(messages) || !participant?.client_id) return [];
+
+  const participantSocketIds = new Set([
+    participant.socket_id,
+    `api:${participant.client_id}`,
+  ].filter(Boolean));
+
+  return messages
+    .filter((message) => message.status !== 'read')
+    .filter((message) => !participantSocketIds.has(message.senderSocketId))
+    .map((message) => message.id);
+}
+
 function ensureDatabaseReady(res) {
   if (dbState.ready) return true;
 
@@ -166,6 +181,12 @@ app.get('/api/allMessages/:roomId', async (req, res) => {
     const messages = await getAllMessagesForParticipant(auth.room.id, auth.participant.client_id);
     await updateParticipantCursor(auth.room.id, auth.participant.client_id, messages);
 
+    const readMessageIds = getIncomingUnreadMessageIdsForParticipant(messages, auth.participant);
+    if (readMessageIds.length > 0) {
+      await markRead(readMessageIds);
+      io.to(auth.room.room_code).emit('messages-read', { messageIds: readMessageIds });
+    }
+
     return res.json({ roomId: auth.room.room_code, participantId: auth.participant.client_id, count: messages.length, messages });
   } catch (error) {
     console.error('Failed to fetch all messages via REST API', error);
@@ -182,6 +203,12 @@ app.get('/api/getLatest/:roomId', async (req, res) => {
 
     const messages = await getLatestMessagesForParticipant(auth.room.id, auth.participant.client_id);
     await updateParticipantCursor(auth.room.id, auth.participant.client_id, messages);
+
+    const readMessageIds = getIncomingUnreadMessageIdsForParticipant(messages, auth.participant);
+    if (readMessageIds.length > 0) {
+      await markRead(readMessageIds);
+      io.to(auth.room.room_code).emit('messages-read', { messageIds: readMessageIds });
+    }
 
     return res.json({
       roomId: auth.room.room_code,
