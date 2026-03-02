@@ -27,7 +27,7 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
 
 ## UI Behavior Notes (important)
 
-- The Bot API quick guide is visible on both the landing screen and inside the room screen (no expand click required).
+- The Bot API README is collapsed by default on both landing and room screens; expand it from the bottom "Bot API README" toggle when needed.
 - Chat auto-scrolls to newest messages when new messages arrive so operators can watch live updates.
 - Message bubbles are constrained to the chat container and long unbroken text wraps instead of overflowing off-screen.
 - Messages sent over `POST /api/send/:roomId` are broadcast live to connected website users via Socket.IO; they are no longer API-only updates.
@@ -455,3 +455,29 @@ Get all messages:
 ```bash
 curl "http://localhost:3000/api/allMessages/REPLACE_WITH_ROOM_ID?participantId=REPLACE_WITH_PARTICIPANT_ID"
 ```
+
+
+### Escaping apostrophes / single quotes in bot payloads
+
+When sending JSON with cURL, apostrophes (single quotes) are valid inside JSON strings (for example `I'm`).
+
+The quoting issue is usually from your shell, not the API:
+
+- **Recommended (Bash):** wrap `-d` payload in double quotes and escape inner JSON double quotes.
+- **If using single-quoted `-d`:** escape apostrophes as <code>'\''</code> inside the shell string.
+
+Recommended pattern:
+
+```bash
+curl -X POST http://localhost:3000/api/send/REPLACE_WITH_ROOM_ID \
+  -H "Content-Type: application/json" \
+  -H "x-participant-id: REPLACE_WITH_PARTICIPANT_ID" \
+  -d "{\"text\":\"I'm checking the logs\"}"
+```
+
+Single-quoted payload variant (Bash):
+
+```bash
+-d '{"text":"I'\''m checking the logs"}'
+```
+

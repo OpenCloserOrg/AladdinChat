@@ -197,6 +197,28 @@ button.warn { background: #b45309; }
   background: rgba(30, 64, 175, 0.14);
   padding: .8rem .9rem;
 }
+.bot-readme-collapsible > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #93c5fd;
+  margin-bottom: .45rem;
+}
+
+.bot-readme-collapsible[open] > summary {
+  margin-bottom: .65rem;
+}
+
+.bot-readme-collapsible > summary::marker {
+  color: #7dd3fc;
+}
+
+.bot-readme-collapsible > *:not(summary):first-child {
+  margin-top: 0;
+}
+
+.bot-readme-collapsible > *:last-child {
+  margin-bottom: 0;
+}
 .api-readme-home h2,
 .api-readme-home h3 {
   margin: 0 0 .45rem;
@@ -215,8 +237,6 @@ button.warn { background: #b45309; }
 }
 
 .bot-api-readme-panel {
-  border-top: 1px solid rgba(148, 163, 184, 0.25);
-  padding-top: .55rem;
   border: 1px solid #334155;
   border-radius: 10px;
   padding: .6rem .7rem;
