@@ -121,8 +121,15 @@ const API_DOCS = {
   },
 };
 
-app.use(express.json());
+app.use(express.json({ limit: '200kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+pool.on('error', (error) => {
+  dbState.ready = false;
+  dbState.checkedAt = new Date().toISOString();
+  dbState.error = error.message;
+  console.error('Database pool emitted an error.', error);
+});
 
 
 app.get('/rooms/:roomId', (req, res) => {
@@ -313,7 +320,7 @@ app.get('/api/getLatest/:roomId', async (req, res) => {
 app.post('/api/send/:roomId', async (req, res) => {
   if (!ensureDatabaseReady(res)) return;
 
-  const text = String(req.body.text || '').trim();
+  const text = sanitizeIncomingText(req.body.text, 5000);
   if (!text) {
     return res.status(400).json({ error: 'text is required.' });
   }
@@ -323,11 +330,11 @@ app.post('/api/send/:roomId', async (req, res) => {
     if (auth.error) return res.status(auth.status).json({ error: auth.error });
 
     const senderRole = auth.participant.role === 'human' ? 'human' : 'ai';
-    const cleanText = text.slice(0, 5000);
+    const cleanText = text;
     const safeTaskState = ['none', 'task_start', 'task_update', 'task_complete'].includes(req.body.taskState)
       ? req.body.taskState
       : 'none';
-    const safeTaskDescription = String(req.body.taskDescription || '').trim().slice(0, 500);
+    const safeTaskDescription = sanitizeIncomingText(req.body.taskDescription, 500);
 
     if (safeTaskState !== 'none' && senderRole !== 'ai') {
       return res.status(400).json({ error: 'taskState flags are only available for AI participants.' });
@@ -649,7 +656,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send-message', async ({ roomCode, text, emergencyInterject = false, taskState = 'none', taskDescription = '' }) => {
-    if (!roomCode || !text || !text.trim()) return;
+    if (!roomCode) return;
+
+    const cleanText = sanitizeIncomingText(text, 5000);
+    if (!cleanText) return;
 
     try {
       const room = await getRoomByCode(roomCode);
@@ -688,13 +698,12 @@ io.on('connection', (socket) => {
         await emitParticipantUpdate(roomCode, room.id);
       }
 
-      const cleanText = text.trim().slice(0, 5000);
       const senderRole = socket.data.role === 'human' ? 'human' : 'ai';
       const roles = await getParticipantRoles(room.id);
       const hasHuman = roles.includes('human');
       const heldForAi = room.pause_ai && hasHuman && senderRole === 'human' && !emergencyInterject;
       const safeTaskState = ['none', 'task_start', 'task_update', 'task_complete'].includes(taskState) ? taskState : 'none';
-      const safeTaskDescription = String(taskDescription || '').trim().slice(0, 500);
+      const safeTaskDescription = sanitizeIncomingText(taskDescription, 500);
       const delayedForAiUntil = senderRole === 'ai' ? new Date(Date.now() + AI_MESSAGE_DELAY_MS).toISOString() : null;
 
       const senderDisplayName = socket.data.displayName || (senderRole === 'human' ? 'Human' : 'AI');
@@ -837,6 +846,21 @@ function normalizeRole(role) {
   return null;
 }
 
+function stripIllegalControlChars(value) {
+  return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+}
+
+function sanitizeIncomingText(value, maxLength) {
+  if (typeof value !== 'string') return '';
+
+  const normalized = stripIllegalControlChars(value)
+    .normalize('NFKC')
+    .replace(/\r\n/g, '\n')
+    .trim();
+
+  return normalized.slice(0, maxLength);
+}
+
 function normalizeRoomCode(roomCode) {
   if (typeof roomCode !== 'string') return '';
   return roomCode.trim();
@@ -970,6 +994,21 @@ async function emitParticipantUpdate(roomCode, roomId) {
     participants,
   });
 }
+
+app.use((error, req, res, next) => {
+  if (error?.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      error: 'Invalid JSON body. Escape quotes/newlines in string values and resend the request.',
+    });
+  }
+
+  if (error) {
+    console.error('Unhandled Express error', error);
+    return res.status(500).json({ error: 'Unexpected server error.' });
+  }
+
+  return next();
+});
 
 (async () => {
   try {
