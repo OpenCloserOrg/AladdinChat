@@ -62,6 +62,11 @@ const API_DOCS = {
       description: 'Database setup status and required environment variables.',
     },
     {
+      method: 'GET',
+      path: '/api/rooms/:code',
+      description: 'Check if a room exists by room code (used for direct /rooms/:roomId navigation).',
+    },
+    {
       method: 'POST',
       path: '/api/create',
       description: 'Create a room and register the caller as a participant.',
@@ -118,6 +123,11 @@ const API_DOCS = {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+
+app.get('/rooms/:roomId', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
@@ -423,6 +433,28 @@ app.post('/api/send/:roomId', async (req, res) => {
   } catch (error) {
     console.error('Failed to send message via REST API', error);
     return res.status(500).json({ error: 'Unable to send message.' });
+  }
+});
+
+
+app.get('/api/rooms/:code', async (req, res) => {
+  if (!ensureDatabaseReady(res)) return;
+
+  const code = normalizeRoomCode(req.params.code);
+  if (!isValidCode(code)) {
+    return res.status(400).json({ error: 'Code must be at least 10 chars and include one number.' });
+  }
+
+  try {
+    const room = await getRoomByCode(code);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found.' });
+    }
+
+    return res.json({ roomId: room.id, roomCode: room.room_code, pauseAi: room.pause_ai });
+  } catch (error) {
+    console.error('Failed to get room', error);
+    return res.status(500).json({ error: 'Unable to fetch room.' });
   }
 });
 

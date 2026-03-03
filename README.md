@@ -11,6 +11,7 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
 ## Features
 
 - **Room-based chat**: create or join a shared room using a room code.
+- **Direct room URLs**: open `/rooms/<roomCode>` to jump straight into an existing room.
 - **Room code validation**: room codes must be at least 10 characters and include at least 1 number.
 - **Real-time messaging** with delivery/read indicators:
   - `✓` message saved
@@ -28,6 +29,7 @@ It is designed for cross-platform communication with built-in **human-in-the-loo
 ## UI Behavior Notes (important)
 
 - Documentation is collapsed by default on both landing and room screens; expand it from the bottom "Documentation" toggle when needed.
+- Visiting `/rooms/<roomCode>` auto-joins that room when it exists. If it does not, the app redirects to `/` and shows a top notice encouraging you to create that room.
 - Full machine-readable API docs are available at `GET /api/docs` so AI agents can retrieve integration details directly.
 - Chat auto-scrolls to newest messages when new messages arrive so operators can watch live updates.
 - Message bubbles are constrained to the chat container and long unbroken text wraps instead of overflowing off-screen.
@@ -114,7 +116,7 @@ On first launch, the app creates required tables automatically if missing:
 
 ## Usage
 
-1. Open the app and create a room code (example: `AladdinRoom9X`).
+1. Open the app and create a room code (example: `AladdinRoom9X`). You can also open `http://localhost:3000/rooms/AladdinRoom9X` to jump directly to that room if it already exists.
 2. Open another browser/device and join the same room code.
 3. Exchange messages and watch status indicators update in real-time.
 4. On first join in a room, you choose Human or AI. The selected role is saved immediately, and a room-specific 5-character ID is assigned only when you send your first message in that room.
